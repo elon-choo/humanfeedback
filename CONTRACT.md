@@ -41,7 +41,7 @@ No SQL DB. Everything is JSON/binary objects in one Blob store.
   "urgency": "high",                       // "low" | "medium" | "high"
   "createdAt": "2026-07-14T09:12:00+09:00",// set by SERVER
   "answeredAt": null,                      // set by SERVER when first answer arrives
-  "cwd": "/Users/elon/work/funnelchat",   // project dir that posted it (for local pickup filter)
+  "cwd": "/home/you/work/funnelchat",     // project dir that posted it (for local pickup filter)
   "machine": "elon-mac",                   // hostname
   "sessionId": "3f2a…uuid",               // OPTIONAL: Claude Code session UUID (CLAUDE_CODE_SESSION_ID)
                                            //   set by the CLI. Lets the watcher route the answer back
@@ -191,7 +191,7 @@ Server stores this array VERBATIM in the answer JSON. Server does not decrypt, p
 
 The matching Node decryption (in the local CLI, not this app): `createECDH('prime256v1').setPrivateKey(priv).computeSecret(ephemeralPubRaw)` → same 32 bytes → `hkdfSync('sha256', shared, emptySalt, info, 32)` → `createDecipheriv('aes-256-gcm', key, iv)` with `setAAD(aad)`, last 16 bytes of ciphertext = authTag.
 
-**Secret UI:** masked `type=password` field(s), one per `secretRequests` entry, with a "🔒 이 값은 암호화되어 엘런 컴퓨터에서만 열립니다" note and a paste button. Never sent to STT. Submit alongside the normal answer (a secret handout may accompany a chosen number or stand alone).
+**Secret UI:** masked `type=password` field(s), one per `secretRequests` entry, with a "🔒 이 값은 암호화되어 내 컴퓨터에서만 열립니다" note (owner name is configurable via `NEXT_PUBLIC_OWNER_NAME`) and a paste button. Never sent to STT. Submit alongside the normal answer (a secret handout may accompany a chosen number or stand alone).
 
 ### 8.5.2 Attachments (files / screenshots)
 Answer bar has an attach control (accept `image/*` and common docs; also support paste-image and drag-drop).
