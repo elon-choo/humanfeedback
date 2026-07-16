@@ -1,6 +1,6 @@
 # 나만의 결정 인박스 만들기
 
-이 안내서는 elonfeedback을 **내 Vercel 계정에, 나만 사용하는 인스턴스로** 배포하는 방법입니다. 기존 사용자의 서비스나 데이터에는 연결하지 않습니다. 처음부터 새로 복제한 이 폴더에서 진행하세요.
+이 안내서는 humanfeedback을 **내 Vercel 계정에, 나만 사용하는 인스턴스로** 배포하는 방법입니다. 기존 사용자의 서비스나 데이터에는 연결하지 않습니다. 처음부터 새로 복제한 이 폴더에서 진행하세요.
 
 설정 도구는 현재 폴더에 연결된 Vercel 프로젝트만 다룹니다. 실행 중 예상하지 못한 프로젝트 이름이나 팀 이름이 보이면 즉시 중단하고, 올바른 계정과 새 프로젝트인지 확인하세요.
 
@@ -17,7 +17,7 @@
 
 - **OpenAI API 키**: [OpenAI API Keys](https://platform.openai.com/api-keys)에서 새 키를 만드세요. 음성 답변을 글로 바꾸는 데 사용됩니다. ChatGPT 구독과 API 결제는 별개이므로, OpenAI API 계정의 결제 설정도 확인하세요.
 
-OpenAI 키, 로그인 PIN, `ELONFEEDBACK_TOKEN`은 비밀번호입니다. Git에 커밋하거나 메신저·문서·스크린샷에 공개하지 마세요.
+OpenAI 키, 로그인 PIN, `HUMANFEEDBACK_TOKEN`은 비밀번호입니다. Git에 커밋하거나 메신저·문서·스크린샷에 공개하지 마세요.
 
 ## 가장 쉬운 방법: AI 도우미에게 부탁하기
 
@@ -31,9 +31,11 @@ OpenAI 키, 로그인 PIN, `ELONFEEDBACK_TOKEN`은 비밀번호입니다. Git에
 
 ### 1. 이 폴더에서 준비하기
 
-터미널을 열고 새로 복제한 elonfeedback 폴더로 이동한 뒤 패키지를 설치하세요.
+터미널을 열고 저장소를 새로 복제한 뒤 패키지를 설치하세요.
 
 ```bash
+git clone https://github.com/elon-choo/humanfeedback.git
+cd humanfeedback
 npm install
 node scripts/setup.mjs --check
 ```
@@ -49,12 +51,12 @@ node scripts/setup.mjs
 설정 도구는 다음 일을 순서대로 처리합니다.
 
 1. Vercel CLI 설치와 로그인 상태를 확인합니다. 로그인이 필요하면 안전하게 종료하며 `vercel login`을 안내합니다.
-2. 현재 폴더를 내 Vercel 프로젝트에 연결합니다. 화면에 표시된 계정·팀·프로젝트 이름이 모두 내 것인지 확인하세요.
+2. 현재 폴더를 내 Vercel 개인 스코프의 새 프로젝트에 연결합니다. 같은 이름의 기존 프로젝트를 고르지 않도록 랜덤 고유 이름을 만들고 `.humanfeedback-project.json`에 로컬로 기억합니다. 화면에 표시된 계정과 프로젝트가 모두 내 것인지 확인하세요.
 3. Vercel Blob 저장소와 `BLOB_READ_WRITE_TOKEN`이 이미 연결되어 있는지 확인합니다.
 4. 앱과 로컬 CLI가 통신할 강한 토큰과 로그인 PIN을 만들고, OpenAI API 키를 입력받습니다.
 5. 필요한 환경 변수를 Production, Preview, Development 환경에 설정합니다.
 6. 내 Vercel 프로젝트를 Production으로 배포합니다.
-7. 접속 주소와 로컬 CLI 설정을 `./.elonfeedback.env`에 저장하고 다음 단계의 명령을 출력합니다.
+7. 접속 주소와 로컬 CLI 설정을 `./.humanfeedback.env`에 저장하고 다음 단계의 명령을 출력합니다.
 
 OpenAI 키는 다음 두 방법 중 하나로 전달할 수 있습니다.
 
@@ -86,31 +88,31 @@ node scripts/setup.mjs
 
 ### 4. 완료 후 로컬 설정 연결하기
 
-배포가 끝나면 프로젝트 루트에 `.elonfeedback.env`가 생깁니다. 설정 도구는 다른 사용자가 읽지 못하도록 이 파일의 권한을 `0600`으로 지정합니다. 파일은 재실행이 다른 Vercel 프로젝트의 비밀값을 섞지 않도록 내부 프로젝트 식별 정보도 함께 보관하며, CLI에 복사할 중요한 값은 다음 세 줄입니다.
+배포가 끝나면 프로젝트 루트에 `.humanfeedback.env`가 생깁니다. 설정 도구는 다른 사용자가 읽지 못하도록 이 파일의 권한을 `0600`으로 지정합니다. 파일은 재실행이 다른 Vercel 프로젝트의 비밀값을 섞지 않도록 내부 프로젝트 식별 정보도 함께 보관하며, CLI에 복사할 중요한 값은 다음 세 줄입니다.
 
 ```dotenv
-ELONFEEDBACK_URL=https://내-프로젝트.vercel.app
-ELONFEEDBACK_TOKEN=생성된-긴-토큰
-ELON_PIN=생성된-PIN
+HUMANFEEDBACK_URL=https://내-프로젝트.vercel.app
+HUMANFEEDBACK_TOKEN=생성된-긴-토큰
+HUMANFEEDBACK_PIN=생성된-PIN
 ```
 
 설정 도구가 마지막에 출력하는 위 세 줄을 개인 컴퓨터의 `~/.env`에 직접 추가하세요. 기존 `~/.env` 내용을 지우지 말고 필요한 줄만 추가하거나 교체하세요. 설정 도구는 사용자의 선택을 존중하기 위해 `~/.env`나 `~/.claude`를 자동으로 수정하지 않습니다.
 
-로컬 CLI는 이 저장소의 `bin/elonfeedback`에 포함되어 있습니다. **저장소 루트에서** 다음 명령으로 설치한 뒤 연결 상태를 확인하세요.
+로컬 CLI는 이 저장소의 `bin/humanfeedback`에 포함되어 있습니다. **저장소 루트에서** 다음 명령으로 설치한 뒤 연결 상태를 확인하세요.
 
 ```bash
 npm install --global .
-elonfeedback doctor
+humanfeedback doctor
 ```
 
 CLI 코드를 자주 수정하는 개발 환경에서는 전역 설치 대신 `npm link`를 사용할 수 있습니다.
 
 ```bash
 npm link
-elonfeedback doctor
+humanfeedback doctor
 ```
 
-두 설치 방법 모두 이 저장소의 `package.json`에 등록된 `bin/elonfeedback`을 사용합니다. 설정 도구는 사용자의 선택을 존중하기 위해 `~/.env`와 `~/.claude`를 수정하지 않으며, CLI 설치도 자동 실행하지 않습니다. `command not found`가 나오면 npm의 전역 실행 파일 폴더가 `PATH`에 포함되어 있는지 확인하세요.
+두 설치 방법 모두 이 저장소의 `package.json`에 등록된 `bin/humanfeedback`을 사용합니다. 설정 도구는 사용자의 선택을 존중하기 위해 `~/.env`와 `~/.claude`를 수정하지 않으며, CLI 설치도 자동 실행하지 않습니다. `command not found`가 나오면 npm의 전역 실행 파일 폴더가 `PATH`에 포함되어 있는지 확인하세요.
 
 ## 이름과 화면 제목 바꾸기(선택)
 
@@ -130,14 +132,16 @@ NEXT_PUBLIC_APP_TITLE=내 결정 인박스
 - Vercel 로그인이 풀렸다면 `vercel login` 후 다시 실행하세요.
 - Blob 안내가 반복되면 Vercel 프로젝트 설정에서 `BLOB_READ_WRITE_TOKEN`이 세 환경 모두에 연결되었는지 확인하세요.
 - 음성 변환이 실패하면 OpenAI API 키와 API 결제 상태를 확인하세요.
-- Vercel Dashboard에서 `ELONFEEDBACK_TOKEN`이나 `ELON_PIN`을 직접 교체했다면 세 환경의 값을 모두 같은 값으로 바꾸고, 그 값을 명시해 한 번 재실행하세요. Vercel의 Sensitive 값은 설정 도구가 다시 읽어 비교할 수 없습니다.
+- Vercel Dashboard에서 `HUMANFEEDBACK_TOKEN`이나 `HUMANFEEDBACK_PIN`을 직접 교체했다면 세 환경의 값을 모두 같은 값으로 바꾸고, 그 값을 명시해 한 번 재실행하세요. Vercel의 Sensitive 값은 설정 도구가 다시 읽어 비교할 수 없습니다.
 
   ```bash
-  read -rsp '새 ELONFEEDBACK_TOKEN: ' ELONFEEDBACK_TOKEN; echo
-  read -rsp '새 ELON_PIN: ' ELON_PIN; echo
-  export ELONFEEDBACK_TOKEN ELON_PIN
+  read -rsp '새 HUMANFEEDBACK_TOKEN: ' HUMANFEEDBACK_TOKEN; echo
+  read -rsp '새 HUMANFEEDBACK_PIN: ' HUMANFEEDBACK_PIN; echo
+  export HUMANFEEDBACK_TOKEN HUMANFEEDBACK_PIN
   node scripts/setup.mjs
-  unset ELONFEEDBACK_TOKEN ELON_PIN
+  unset HUMANFEEDBACK_TOKEN HUMANFEEDBACK_PIN
   ```
 
-`.elonfeedback.env`와 `~/.env`는 개인 비밀 파일입니다. 공유하거나 Git에 추가하지 마세요. PIN이나 토큰이 노출되었다면 Vercel 환경 변수에서 새 값으로 교체한 뒤 다시 배포하세요.
+`.humanfeedback.env`와 `~/.env`는 개인 비밀 파일입니다. 공유하거나 Git에 추가하지 마세요. PIN이나 토큰이 노출되었다면 Vercel 환경 변수에서 새 값으로 교체한 뒤 다시 배포하세요.
+
+`.humanfeedback-project.json`도 사용자별 로컬 설정 파일이며 Git에서 제외됩니다. 다른 사람에게 복사하지 마세요.

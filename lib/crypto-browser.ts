@@ -3,7 +3,7 @@
 export const SECRET_ENCRYPTION_ALGORITHM =
   "ecdh-p256-hkdf-sha256-aes256gcm" as const;
 
-const HKDF_INFO = "elonfeedback-secret-v1";
+const HKDF_INFO = "humanfeedback-secret-v1";
 
 export interface EncryptedSecret {
   id: string;

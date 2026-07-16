@@ -2,7 +2,12 @@ node_modules/
 .next/
 .env*
 !.env.example
+.humanfeedback.env
+# backward-compat with the original elonfeedback naming
 .elonfeedback.env
+.humanfeedback-project.json
+# backward-compat with the original elonfeedback naming
+.elonfeedback-project.json
 .vercel/
 npm-debug.log*
 .DS_Store

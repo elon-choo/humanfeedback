@@ -59,7 +59,7 @@ export interface DecisionRequest {
   /** Claude Code session UUID that posted this (CLAUDE_CODE_SESSION_ID), for precise
    *  routing of the answer back to the exact session. Optional (older clients omit it). */
   sessionId?: string;
-  /** Human-readable session/context label (e.g. a short task description), shown to Elon. */
+  /** Human-readable session/context label (e.g. a short task description), shown to the owner. */
   sessionLabel?: string;
   title: string;
   tldr: string;

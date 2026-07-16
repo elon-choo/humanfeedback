@@ -1,4 +1,4 @@
-# 결정 인박스 (elonfeedback)
+# 결정 인박스 (humanfeedback)
 
 바쁜 사람이 **자기 결정을 미루지 않도록** 돕는 1인용 도구입니다. AI 어시스턴트(Claude Code 등)가
 "이건 내가 정할 게 아니라 당신이 정할 일"인 순간을 만나면, 인라인으로 질문해 흐름을 끊는 대신
@@ -30,7 +30,7 @@
 ## 구성
 
 - **웹앱** (Next.js, Vercel 배포) — 대시보드 + 결정 페이지 + 답변 저장.
-- **로컬 CLI** (`bin/elonfeedback`) — AI가 결정을 게시하고(`ask`) 답을 회수하며(`inbox`), 과거 결정을
+- **로컬 CLI** (`bin/humanfeedback`) — AI가 결정을 게시하고(`ask`) 답을 회수하며(`inbox`), 과거 결정을
   참고하고(`history`), 당신의 결정 성향 프로필을 관리합니다(`profile`, 반영은 항상 당신 승인 후에만).
 - **인터페이스 계약**은 [CONTRACT.md](./CONTRACT.md)에 정의되어 있습니다.
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * elonfeedback — local CLI for the human-feedback pages app.
+ * humanfeedback — local CLI for the human-feedback pages app.
  * Posts decision requests to the configured single-user instance and picks up its owner's answers.
- * Dependency-free (Node built-ins only). Matches CONTRACT.md in ~/work/elonfeedback.
+ * Dependency-free (Node built-ins only). Matches this repository's CONTRACT.md.
  *
  * Commands:
  *   ask [file.json|-]                 post a decision request; prints the URL
@@ -23,12 +23,19 @@ const path = require('path');
 const crypto = require('crypto');
 
 const HOME = os.homedir();
-const STATE_DIR = path.join(HOME, '.claude', 'elonfeedback');
+const NEW_STATE_DIR = path.join(HOME, '.claude', 'humanfeedback');
+// backward-compat with the original elonfeedback naming
+const LEGACY_STATE_DIR = path.join(HOME, '.claude', 'elonfeedback');
+const STATE_DIR = fs.existsSync(NEW_STATE_DIR)
+  ? NEW_STATE_DIR
+  : (fs.existsSync(LEGACY_STATE_DIR) ? LEGACY_STATE_DIR : NEW_STATE_DIR);
 const KEYS_DIR = path.join(STATE_DIR, 'keys');
 const SECRETS_DIR = path.join(STATE_DIR, 'secrets');
 const PROFILE_FILE = path.join(STATE_DIR, 'profile.json');          // APPROVED profile (never auto-written)
 const PROFILE_PENDING = path.join(STATE_DIR, 'profile-pending.json'); // proposed next version, awaiting owner approval
-const HKDF_INFO = Buffer.from('elonfeedback-secret-v1', 'utf8');
+const HKDF_INFO = Buffer.from('humanfeedback-secret-v1', 'utf8');
+// backward-compat with the original elonfeedback naming
+const LEGACY_HKDF_INFO = Buffer.from('elonfeedback-secret-v1', 'utf8');
 
 // ---------- config ----------
 function parseDotEnv(keys) {
@@ -47,23 +54,32 @@ function parseDotEnv(keys) {
   return out;
 }
 function cfg() {
-  const need = ['ELONFEEDBACK_URL', 'ELONFEEDBACK_TOKEN'];
+  const need = [
+    'HUMANFEEDBACK_URL',
+    'HUMANFEEDBACK_TOKEN',
+    // backward-compat with the original elonfeedback naming
+    'ELONFEEDBACK_URL',
+    'ELONFEEDBACK_TOKEN',
+  ];
   const fromEnv = {};
   for (const k of need) if (process.env[k]) fromEnv[k] = process.env[k];
   const fromFile = parseDotEnv(need);
-  const configuredUrl = fromEnv.ELONFEEDBACK_URL || fromFile.ELONFEEDBACK_URL || '';
-  const token = fromEnv.ELONFEEDBACK_TOKEN || fromFile.ELONFEEDBACK_TOKEN || '';
+  // backward-compat with the original elonfeedback naming
+  const configuredUrl = fromEnv.HUMANFEEDBACK_URL || fromEnv.ELONFEEDBACK_URL
+    || fromFile.HUMANFEEDBACK_URL || fromFile.ELONFEEDBACK_URL || '';
+  const token = fromEnv.HUMANFEEDBACK_TOKEN || fromEnv.ELONFEEDBACK_TOKEN
+    || fromFile.HUMANFEEDBACK_TOKEN || fromFile.ELONFEEDBACK_TOKEN || '';
   if (!configuredUrl) {
-    fail('ELONFEEDBACK_URL 설정이 없습니다. `node scripts/setup.mjs`를 완료한 뒤 ~/.env에 ELONFEEDBACK_URL=https://내-배포주소 를 추가하세요.');
+    fail('HUMANFEEDBACK_URL 설정이 없습니다. `node scripts/setup.mjs`를 완료한 뒤 ~/.env에 HUMANFEEDBACK_URL=https://내-배포주소 를 추가하세요.');
   }
   if (!token) {
-    fail('ELONFEEDBACK_TOKEN 설정이 없습니다. `node scripts/setup.mjs`가 만든 토큰을 ~/.env 또는 환경 변수에 추가하세요.');
+    fail('HUMANFEEDBACK_TOKEN 설정이 없습니다. `node scripts/setup.mjs`가 만든 토큰을 ~/.env 또는 환경 변수에 추가하세요.');
   }
   let parsed;
   try { parsed = new URL(configuredUrl); }
-  catch (_) { fail('ELONFEEDBACK_URL이 올바른 URL이 아닙니다: ' + configuredUrl); }
+  catch (_) { fail('HUMANFEEDBACK_URL이 올바른 URL이 아닙니다: ' + configuredUrl); }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    fail('ELONFEEDBACK_URL은 http:// 또는 https:// 주소여야 합니다.');
+    fail('HUMANFEEDBACK_URL은 http:// 또는 https:// 주소여야 합니다.');
   }
   const url = configuredUrl.replace(/\/+$/, '');
   return { url, token };
@@ -189,7 +205,7 @@ async function cmdAsk(pos, flags = {}) {
     await cmdWait([json.slug], flags);
     return;
   }
-  console.log('\n결정권자에게 이 링크를 열어 답해달라고 전하세요. 답은 나중에 `elonfeedback inbox`로 회수됩니다.');
+  console.log('\n결정권자에게 이 링크를 열어 답해달라고 전하세요. 답은 나중에 `humanfeedback inbox`로 회수됩니다.');
 }
 
 async function fetchRequests(flags, status) {
@@ -257,7 +273,7 @@ function printItem(it, url) {
       for (const at of a.attachments) console.log(`    📎 ${safe(at.name, 200)} (${safe(at.contentType, 100)}) ${safe(at.url, 500)}`);
     }
     if (Array.isArray(a.secrets) && a.secrets.length) {
-      for (const s of a.secrets) console.log(`    🔐 시크릿 '${safe(s.id, 100)}' 수신 — \`elonfeedback secret ${r.slug} ${safe(s.id, 100)}\` 로 로컬 복호화`);
+      for (const s of a.secrets) console.log(`    🔐 시크릿 '${safe(s.id, 100)}' 수신 — \`humanfeedback secret ${r.slug} ${safe(s.id, 100)}\` 로 로컬 복호화`);
     }
   }
   console.log('');
@@ -287,14 +303,14 @@ async function pollUntilAnswered(slug, { timeoutMs, intervalMs, onTick } = {}) {
 // post a decision and AWAIT the answer inline, like awaiting a subagent, and continue.
 async function cmdWait(pos, flags) {
   const slug = pos[0];
-  if (!slug) fail('사용법: elonfeedback wait <slug> [--timeout SEC] [--interval SEC]');
+  if (!slug) fail('사용법: humanfeedback wait <slug> [--timeout SEC] [--interval SEC]');
   const timeoutMs = Math.max(10, Number(flags.timeout) || 540) * 1000;
   const intervalMs = Math.max(3, Number(flags.interval) || 8) * 1000;
   const { url } = cfg();
   if (!flags.quiet) console.error(`⏳ ${slug} 답변 대기 중… (최대 ${Math.round(timeoutMs / 1000)}초, ${Math.round(intervalMs / 1000)}초 간격)`);
   const item = await pollUntilAnswered(slug, { timeoutMs, intervalMs });
   if (!item) {
-    console.error(`⏳ 타임아웃 — 아직 답변이 없습니다. 나중에 \`elonfeedback wait ${slug}\`로 다시 대기하거나, 다음 세션에서 \`elonfeedback inbox\`로 픽업됩니다.`);
+    console.error(`⏳ 타임아웃 — 아직 답변이 없습니다. 나중에 \`humanfeedback wait ${slug}\`로 다시 대기하거나, 다음 세션에서 \`humanfeedback inbox\`로 픽업됩니다.`);
     process.exit(2); // exit 2 = timed out (not an error) so callers can re-wait or fall back to async
   }
   if (flags.json) { console.log(JSON.stringify(item, null, 2)); return; }
@@ -310,7 +326,7 @@ async function cmdInbox(flags) {
   if (flags.quiet) {
     if (items.length) {
       const n = items.reduce((s, it) => s + it.answers.length, 0);
-      console.log(`📮 elonfeedback: 이 프로젝트에 응답된 피드백 ${n}건이 픽업 대기 중 — \`elonfeedback inbox --cwd .\`로 확인 후 반영하세요.`);
+      console.log(`📮 humanfeedback: 이 프로젝트에 응답된 피드백 ${n}건이 픽업 대기 중 — \`humanfeedback inbox --cwd .\`로 확인 후 반영하세요.`);
     }
     process.exit(0);
   }
@@ -325,12 +341,12 @@ async function cmdInbox(flags) {
     await api('POST', '/api/answers/pickup', { body: { slugs } });
     console.log(`(${slugs.length}건 픽업 완료로 표시)`);
   } else {
-    console.log('반영을 끝냈으면 `elonfeedback pickup <slug>` 로 표시하면 다시 안 뜹니다.');
+    console.log('반영을 끝냈으면 `humanfeedback pickup <slug>` 로 표시하면 다시 안 뜹니다.');
   }
 }
 
 async function cmdPickup(pos) {
-  if (!pos.length) fail('사용법: elonfeedback pickup <slug> [<slug> ...]');
+  if (!pos.length) fail('사용법: humanfeedback pickup <slug> [<slug> ...]');
   const { ok, status, json } = await api('POST', '/api/answers/pickup', { body: { slugs: pos } });
   if (!ok) fail(`pickup 실패 (HTTP ${status}): ${JSON.stringify(json)}`);
   console.log(`픽업 완료: ${json.updated != null ? json.updated : pos.length}건`);
@@ -423,7 +439,7 @@ async function cmdProfile(pos, flags) {
 
   if (sub === 'show') {
     const p = readProfile(PROFILE_FILE);
-    if (!p) { console.log('아직 승인된 성향 프로필이 없습니다. `elonfeedback history`로 이력을 보고 초안을 `profile propose`로 올리세요.'); return; }
+    if (!p) { console.log('아직 승인된 성향 프로필이 없습니다. `humanfeedback history`로 이력을 보고 초안을 `profile propose`로 올리세요.'); return; }
     if (flags.json) { console.log(JSON.stringify(p, null, 2)); return; }
     console.log(`사용자 성향 프로필 v${p.version || 1} (승인 ${p.approvedAt || '?'})\n`);
     console.log(JSON.stringify(p.profile ?? p, null, 2));
@@ -462,7 +478,7 @@ async function cmdProfile(pos, flags) {
     const currentText = current ? '```json\n' + JSON.stringify(current.profile ?? current, null, 2).slice(0, 1200) + '\n```' : '_아직 승인된 프로필 없음 (이게 첫 버전)_';
     const proposedText = '```json\n' + JSON.stringify(draft.profile, null, 2).slice(0, 1600) + '\n```';
     const payload = {
-      project: flags.project || 'elon-profile',
+      project: flags.project || 'human-profile',
       cwd: flags.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
       machine: os.hostname(),
       urgency: 'low',
@@ -487,7 +503,7 @@ async function cmdProfile(pos, flags) {
     console.log('✅ 프로필 업데이트 승인 페이지 게시됨 (아직 반영 안 함 — 사용자 승인 대기)');
     console.log('   URL : ' + json.url);
     console.log('   pending 저장됨: ' + PROFILE_PENDING);
-    console.log('\n사용자가 1번(승인)으로 답하면 `elonfeedback profile apply`, 2번(수정의견)이면 의견 반영해 다시 propose, 3번이면 `profile reject`.');
+    console.log('\n사용자가 1번(승인)으로 답하면 `humanfeedback profile apply`, 2번(수정의견)이면 의견 반영해 다시 propose, 3번이면 `profile reject`.');
     return;
   }
 
@@ -509,12 +525,12 @@ async function cmdProfile(pos, flags) {
     return;
   }
 
-  fail('사용법: elonfeedback profile [show|pending|propose <file|->|apply|reject]');
+  fail('사용법: humanfeedback profile [show|pending|propose <file|->|apply|reject]');
 }
 
 async function cmdGet(pos) {
   const slug = pos[0];
-  if (!slug) fail('사용법: elonfeedback get <slug>');
+  if (!slug) fail('사용법: humanfeedback get <slug>');
   const items = await fetchInbox({}); // all answered
   const found = items.find((it) => it.request.slug === slug);
   if (!found) {
@@ -528,7 +544,7 @@ async function cmdGet(pos) {
 
 async function cmdSecret(pos, flags) {
   const [slug, id] = pos;
-  if (!slug || !id) fail('사용법: elonfeedback secret <slug> <id> [--out FILE] [--print] [--keep-key]');
+  if (!slug || !id) fail('사용법: humanfeedback secret <slug> <id> [--out FILE] [--print] [--keep-key]');
   const key = loadKey(slug);
   if (!key) fail(`이 slug의 로컬 개인키가 없습니다 (${slug}). 이 요청이 이 머신에서 secretRequests 포함으로 생성됐나요?`);
 
@@ -546,12 +562,11 @@ async function cmdSecret(pos, flags) {
   if (!enc) fail(`답변에 시크릿 '${id}' 가 없습니다.`);
 
   // decrypt (ECDH P-256 -> HKDF-SHA256 -> AES-256-GCM), matching the browser encryptSecret
-  let plaintext;
-  try {
+  const decryptWithInfo = (info) => {
     const ecdh = crypto.createECDH('prime256v1');
     ecdh.setPrivateKey(Buffer.from(key.priv, 'base64'));
     const shared = ecdh.computeSecret(Buffer.from(enc.ephemeralPubKey, 'base64'));
-    const aesKey = Buffer.from(crypto.hkdfSync('sha256', shared, Buffer.alloc(0), HKDF_INFO, 32));
+    const aesKey = Buffer.from(crypto.hkdfSync('sha256', shared, Buffer.alloc(0), info, 32));
     const buf = Buffer.from(enc.ciphertext, 'base64');
     const ct = buf.subarray(0, -16);
     const tag = buf.subarray(-16);
@@ -560,9 +575,20 @@ async function cmdSecret(pos, flags) {
     // A misfiled/tampered secret then fails GCM auth instead of silently decrypting.
     decipher.setAAD(Buffer.from(`${slug}:${id}`, 'utf8'));
     decipher.setAuthTag(tag);
-    plaintext = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
-  } catch (e) {
-    fail('복호화 실패: ' + e.message);
+    return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+  };
+  let plaintext;
+  let decryptError;
+  for (const info of [HKDF_INFO, LEGACY_HKDF_INFO]) {
+    try {
+      plaintext = decryptWithInfo(info);
+      break;
+    } catch (error) {
+      decryptError = error;
+    }
+  }
+  if (plaintext === undefined) {
+    fail('복호화 실패: ' + decryptError.message);
   }
 
   if (flags.print) {
@@ -588,9 +614,9 @@ async function cmdSecret(pos, flags) {
 
 async function cmdDoctor() {
   const { url, token } = cfg();
-  console.log('elonfeedback doctor');
+  console.log('humanfeedback doctor');
   console.log('  URL   : ' + url);
-  console.log('  TOKEN : ' + (token ? 'set (len ' + token.length + ')' : '❌ 없음 — ~/.env의 ELONFEEDBACK_TOKEN 확인'));
+  console.log('  TOKEN : ' + (token ? 'set (len ' + token.length + ')' : '❌ 없음 — ~/.env의 HUMANFEEDBACK_TOKEN 확인'));
   console.log('  keys  : ' + KEYS_DIR);
   try {
     const { ok, status } = await api('GET', '/api/requests?status=open', { timeoutMs: 8000 });
@@ -600,10 +626,10 @@ async function cmdDoctor() {
   }
 }
 
-function fail(msg) { console.error('elonfeedback: ' + msg); process.exit(1); }
+function fail(msg) { console.error('humanfeedback: ' + msg); process.exit(1); }
 
 function usage() {
-  console.log(`elonfeedback — 휴먼 피드백 페이지 CLI
+  console.log(`humanfeedback — 휴먼 피드백 페이지 CLI
 
   ask [file.json|-] [--wait] [--timeout SEC] [--interval SEC]
                                      결정 요청 게시(도파민 페이지). URL 출력.
@@ -641,7 +667,7 @@ function usage() {
       case 'get': await cmdGet(pos); break;
       case 'doctor': await cmdDoctor(); break;
       case undefined: case '-h': case '--help': case 'help': usage(); break;
-      default: fail('알 수 없는 명령: ' + cmd + ' (elonfeedback help)');
+      default: fail('알 수 없는 명령: ' + cmd + ' (humanfeedback help)');
     }
   } catch (e) {
     if (flags.quiet) process.exit(0);

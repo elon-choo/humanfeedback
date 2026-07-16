@@ -64,7 +64,7 @@ async function readRateLimit(
     if (now - value.windowStart >= RATE_LIMIT_WINDOW_MS) return null;
     return value;
   } catch {
-    // Rate limiting is defense-in-depth. Blob failures must never lock out Elon.
+    // Rate limiting is defense-in-depth. Blob failures must never lock out the owner.
     return null;
   }
 }
@@ -83,7 +83,7 @@ async function recordFailure(
   try {
     await writeJson(pathname, record);
   } catch {
-    // Fail open on storage errors; the primary defense is a high-entropy ELON_PIN.
+    // Fail open on storage errors; the primary defense is a high-entropy PIN.
   }
 }
 
@@ -133,7 +133,8 @@ export async function POST(request: Request) {
     typeof body.pin === "string"
       ? body.pin
       : null;
-  const expected = process.env.ELON_PIN;
+  // backward-compat with the original elonfeedback naming
+  const expected = process.env.HUMANFEEDBACK_PIN || process.env.ELON_PIN;
 
   if (!expected || !safeStringEqual(pin, expected)) {
     await recordFailure(limiterPath, limiter, now);

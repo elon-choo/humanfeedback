@@ -14,11 +14,26 @@ if (!slug || !plaintext) { console.error('usage: node scripts/secret-e2e.mjs <sl
 const envTxt = await readFile(os.homedir() + '/.env', 'utf8').catch(() => '');
 const env = {};
 for (const l of envTxt.split('\n')) { const t = l.trim(); if (!t || t.startsWith('#')) continue; const i = t.indexOf('='); if (i > 0) env[t.slice(0, i).trim()] = t.slice(i + 1).trim(); }
-const URL = (process.env.ELONFEEDBACK_URL || env.ELONFEEDBACK_URL || '').replace(/\/+$/, '');
-const TOKEN = process.env.ELONFEEDBACK_TOKEN || env.ELONFEEDBACK_TOKEN;
-const PIN = process.env.ELON_PIN || env.ELON_PIN;
+// backward-compat with the original elonfeedback naming
+const URL = (
+  process.env.HUMANFEEDBACK_URL ||
+  process.env.ELONFEEDBACK_URL ||
+  env.HUMANFEEDBACK_URL ||
+  env.ELONFEEDBACK_URL ||
+  ''
+).replace(/\/+$/, '');
+const TOKEN =
+  process.env.HUMANFEEDBACK_TOKEN ||
+  process.env.ELONFEEDBACK_TOKEN ||
+  env.HUMANFEEDBACK_TOKEN ||
+  env.ELONFEEDBACK_TOKEN;
+const PIN =
+  process.env.HUMANFEEDBACK_PIN ||
+  process.env.ELON_PIN ||
+  env.HUMANFEEDBACK_PIN ||
+  env.ELON_PIN;
 if (!URL || !TOKEN || !PIN) {
-  console.error('ELONFEEDBACK_URL, ELONFEEDBACK_TOKEN, ELON_PIN을 환경 변수나 ~/.env에 설정하세요.');
+  console.error('HUMANFEEDBACK_URL, HUMANFEEDBACK_TOKEN, HUMANFEEDBACK_PIN을 환경 변수나 ~/.env에 설정하세요.');
   process.exit(1);
 }
 

@@ -78,7 +78,7 @@ const nodeAesKey = Buffer.from(
     "sha256",
     nodeSharedSecret,
     Buffer.alloc(0),
-    Buffer.from("elonfeedback-secret-v1", "utf8"),
+    Buffer.from("humanfeedback-secret-v1", "utf8"),
     32,
   ),
 );

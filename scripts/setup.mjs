@@ -18,20 +18,38 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LINK_FILE = join(ROOT, ".vercel", "project.json");
-const LOCAL_ENV_FILE = join(ROOT, ".elonfeedback.env");
+const LOCAL_ENV_FILE = join(ROOT, ".humanfeedback.env");
+const PROJECT_INTENT_FILE = join(ROOT, ".humanfeedback-project.json");
 const TARGETS = ["production", "preview", "development"];
 const REQUIRED_ENV_NAMES = [
   "BLOB_READ_WRITE_TOKEN",
   "OPENAI_API_KEY",
-  "ELONFEEDBACK_TOKEN",
-  "ELON_PIN",
+  "HUMANFEEDBACK_TOKEN",
+  "HUMANFEEDBACK_PIN",
 ];
-const LOCAL_PROJECT_ID = "ELONFEEDBACK_SETUP_PROJECT_ID";
-const LOCAL_ORG_ID = "ELONFEEDBACK_SETUP_ORG_ID";
-const LOCAL_SETUP_STATE = "ELONFEEDBACK_SETUP_STATE";
+const LOCAL_PROJECT_ID = "HUMANFEEDBACK_SETUP_PROJECT_ID";
+const LOCAL_ORG_ID = "HUMANFEEDBACK_SETUP_ORG_ID";
+const LOCAL_SETUP_STATE = "HUMANFEEDBACK_SETUP_STATE";
+
+// backward-compat with the original elonfeedback naming
+const LEGACY_LOCAL_ENV_FILE = join(ROOT, ".elonfeedback.env");
+const LEGACY_PROJECT_INTENT_FILE = join(ROOT, ".elonfeedback-project.json");
+const LEGACY_ENV_NAMES = {
+  url: "ELONFEEDBACK_URL",
+  token: "ELONFEEDBACK_TOKEN",
+  pin: "ELON_PIN",
+  projectId: "ELONFEEDBACK_SETUP_PROJECT_ID",
+  orgId: "ELONFEEDBACK_SETUP_ORG_ID",
+  setupState: "ELONFEEDBACK_SETUP_STATE",
+};
+const ENV_NAMES_TO_READ = [
+  ...REQUIRED_ENV_NAMES,
+  LEGACY_ENV_NAMES.token,
+  LEGACY_ENV_NAMES.pin,
+];
 
 const HELP = `\
-elonfeedback 개인 인스턴스 설정
+humanfeedback 개인 인스턴스 설정
 
 사용법:
   node scripts/setup.mjs          설정하고 Production에 배포합니다.
@@ -40,11 +58,11 @@ elonfeedback 개인 인스턴스 설정
 
 일반 실행이 하는 일:
   1. Vercel CLI 설치 및 로그인 상태 확인
-  2. 현재 폴더만 Vercel 프로젝트에 연결 (vercel link --yes)
+  2. 개인 스코프의 고유한 Vercel 프로젝트에 연결 (vercel link --yes --project <고유이름>)
   3. 연결된 프로젝트의 Blob 토큰 확인
   4. 필요한 비밀 값을 Production/Preview/Development에 안전하게 추가
   5. vercel deploy --prod --yes 실행
-  6. 로컬 .elonfeedback.env 파일을 권한 0600으로 작성
+  6. 로컬 .humanfeedback.env 파일을 권한 0600으로 작성
 
 Blob 저장소 추가는 검증한 Vercel CLI 50.1.4에서도 대화형입니다. 토큰이 없으면
 스크립트가 실행하지 않고 정확한 수동 명령과 선택 방법을 안내합니다.
@@ -105,20 +123,45 @@ function parseDotenv(source) {
   return result;
 }
 
-async function readLocalEnv() {
+async function readLocalEnvFile(file) {
   try {
-    return parseDotenv(await readFile(LOCAL_ENV_FILE, "utf8"));
+    return parseDotenv(await readFile(file, "utf8"));
   } catch (error) {
-    if (error?.code === "ENOENT") return {};
+    if (error?.code === "ENOENT") return null;
     throw error;
   }
 }
 
+async function readLocalEnv() {
+  const [legacyValues, canonicalValues] = await Promise.all([
+    readLocalEnvFile(LEGACY_LOCAL_ENV_FILE),
+    readLocalEnvFile(LOCAL_ENV_FILE),
+  ]);
+  const values = { ...(legacyValues || {}), ...(canonicalValues || {}) };
+
+  // backward-compat with the original elonfeedback naming
+  return {
+    ...values,
+    HUMANFEEDBACK_URL:
+      values.HUMANFEEDBACK_URL || values[LEGACY_ENV_NAMES.url],
+    HUMANFEEDBACK_TOKEN:
+      values.HUMANFEEDBACK_TOKEN || values[LEGACY_ENV_NAMES.token],
+    HUMANFEEDBACK_PIN:
+      values.HUMANFEEDBACK_PIN || values[LEGACY_ENV_NAMES.pin],
+    [LOCAL_PROJECT_ID]:
+      values[LOCAL_PROJECT_ID] || values[LEGACY_ENV_NAMES.projectId],
+    [LOCAL_ORG_ID]:
+      values[LOCAL_ORG_ID] || values[LEGACY_ENV_NAMES.orgId],
+    [LOCAL_SETUP_STATE]:
+      values[LOCAL_SETUP_STATE] || values[LEGACY_ENV_NAMES.setupState],
+  };
+}
+
 function hasLocalEnvironmentState(localValues) {
   return [
-    "ELONFEEDBACK_URL",
-    "ELONFEEDBACK_TOKEN",
-    "ELON_PIN",
+    "HUMANFEEDBACK_URL",
+    "HUMANFEEDBACK_TOKEN",
+    "HUMANFEEDBACK_PIN",
     LOCAL_PROJECT_ID,
     LOCAL_ORG_ID,
     LOCAL_SETUP_STATE,
@@ -157,6 +200,85 @@ async function readLink() {
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
+  }
+}
+
+async function readProjectIntentFile(file) {
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    if (
+      typeof parsed.account !== "string" ||
+      typeof parsed.projectName !== "string"
+    ) {
+      throw new Error(`${file} 형식이 올바르지 않습니다.`);
+    }
+    return parsed;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function readProjectIntent() {
+  const canonicalIntent = await readProjectIntentFile(PROJECT_INTENT_FILE);
+  if (canonicalIntent) return canonicalIntent;
+
+  // backward-compat with the original elonfeedback naming
+  return readProjectIntentFile(LEGACY_PROJECT_INTENT_FILE);
+}
+
+function safeProjectPart(value, fallback) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || fallback
+  );
+}
+
+function validateProjectIntent(intent, account, linked = null) {
+  if (!intent) return;
+  if (intent.account !== account) {
+    throw new Error(
+      `${PROJECT_INTENT_FILE}은 Vercel 계정 '${intent.account}'용입니다. 현재 계정 '${account}'에서는 사용하지 않습니다. ` +
+        "원래 계정으로 로그인하거나 파일을 백업한 뒤 이동하세요.",
+    );
+  }
+  if (linked && linked.projectName !== intent.projectName) {
+    throw new Error(
+      `${PROJECT_INTENT_FILE}은 '${intent.projectName}' 프로젝트용이지만 현재 폴더는 '${linked.projectName}'에 연결되어 있습니다. ` +
+        "원격 환경 변수나 배포는 변경하지 않았습니다.",
+    );
+  }
+}
+
+async function ensureProjectIntent(account) {
+  const existing = await readProjectIntent();
+  if (existing) {
+    validateProjectIntent(existing, account);
+    return existing;
+  }
+
+  const rootName = "humanfeedback";
+  const accountPart = safeProjectPart(account, "owner").slice(0, 24);
+  const projectName = `${rootName}-${accountPart}-${randomBytes(6).toString("hex")}`;
+  const intent = { account, projectName };
+
+  try {
+    await writeFile(PROJECT_INTENT_FILE, `${JSON.stringify(intent, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    await chmod(PROJECT_INTENT_FILE, 0o600);
+    return intent;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const raced = await readProjectIntent();
+    if (!raced || raced.account !== account) {
+      throw new Error("프로젝트 생성 의도 파일을 안전하게 확정하지 못했습니다.");
+    }
+    return raced;
   }
 }
 
@@ -272,24 +394,40 @@ async function requireLogin() {
   return account;
 }
 
-async function ensureLinkedProject() {
+async function ensureLinkedProject(account) {
   const existing = await readLink();
   if (existing) {
+    validateProjectIntent(await readProjectIntent(), account, existing);
     console.log(`  ✓ 현재 폴더가 '${existing.projectName}' 프로젝트에 연결되어 있습니다.`);
     return existing;
   }
 
-  console.log("  • 현재 폴더를 새 프로젝트 또는 선택한 프로젝트에 연결합니다.");
-  const result = await runVercel(["link", "--yes"]);
+  const intent = await ensureProjectIntent(account);
+  console.log(
+    `  • 개인 스코프 '${account}'에 고유 프로젝트 '${intent.projectName}'을 만들거나 다시 연결합니다.`,
+  );
+  const result = await runVercel([
+    "link",
+    "--yes",
+    "--project",
+    intent.projectName,
+    "--scope",
+    account,
+  ]);
   if (result.code !== 0) {
     throw new Error(
-      `자동 연결에 실패했습니다. 이 폴더에서 \`vercel link\`를 실행해 프로젝트를 선택한 뒤 다시 실행하세요.\n${conciseFailure(result)}`,
+      `안전한 자동 연결에 실패했습니다. 이 폴더에서 \`vercel link --project ${intent.projectName} --scope ${account}\`를 실행해 본인 프로젝트인지 확인한 뒤 다시 실행하세요.\n${conciseFailure(result)}`,
     );
   }
 
   const linked = await readLink();
   if (!linked) {
     throw new Error("vercel link가 끝났지만 .vercel/project.json을 찾지 못했습니다.");
+  }
+  if (linked.projectName !== intent.projectName) {
+    throw new Error(
+      `Vercel이 요청한 '${intent.projectName}'이 아닌 '${linked.projectName}'에 연결했습니다. 원격 환경 변수나 배포는 변경하지 않았습니다.`,
+    );
   }
   console.log(`  ✓ '${linked.projectName}' 프로젝트에 연결했습니다.`);
   return linked;
@@ -314,7 +452,7 @@ async function getEnvironmentStatus() {
   for (const target of TARGETS) outputs[target] = await listEnvironment(target);
 
   return Object.fromEntries(
-    REQUIRED_ENV_NAMES.map((name) => [
+    ENV_NAMES_TO_READ.map((name) => [
       name,
       Object.fromEntries(
         TARGETS.map((target) => [target, outputHasEnvName(outputs[target], name)]),
@@ -342,7 +480,7 @@ const pulledEnvironmentCache = new Map();
 async function pullEnvironment(target) {
   if (pulledEnvironmentCache.has(target)) return pulledEnvironmentCache.get(target);
 
-  const tempDirectory = await mkdtemp(join(tmpdir(), "elonfeedback-env-"));
+  const tempDirectory = await mkdtemp(join(tmpdir(), "humanfeedback-env-"));
   const destination = join(tempDirectory, "vercel.env");
   try {
     const result = await runVercel([
@@ -470,6 +608,8 @@ async function readSecret(prompt) {
 async function resolveProvisioningValue({
   name,
   status,
+  legacyName,
+  legacyStatus,
   localValues,
   generate,
   prompt,
@@ -477,19 +617,39 @@ async function resolveProvisioningValue({
 }) {
   // Explicit input wins so a deliberate secret rotation can supersede the local
   // recovery cache. Sensitive remote values may intentionally be non-retrievable.
-  if (process.env[name]) return process.env[name].trim();
+  // backward-compat with the original elonfeedback naming
+  const explicitValue =
+    process.env[name]?.trim() ||
+    (legacyName ? process.env[legacyName]?.trim() : "");
+  if (explicitValue) return explicitValue;
 
-  const hasRemoteValue = Boolean(firstPresentTarget(status));
-  const hasMissingTarget = missingTargets(status).length > 0;
+  const canonicalRemoteTarget = firstPresentTarget(status);
+  const legacyRemoteTarget = legacyStatus
+    ? firstPresentTarget(legacyStatus)
+    : undefined;
+  const hasRemoteValue = Boolean(canonicalRemoteTarget || legacyRemoteTarget);
+  const canonicalMissingTargets = missingTargets(status);
+  const hasMissingTarget = canonicalMissingTargets.length > 0;
   const localValue = localValues[name];
   const isPendingRecovery = localValues[LOCAL_SETUP_STATE] === "pending";
+  // backward-compat with the original elonfeedback naming
+  const isLegacyOnlyMigration =
+    !canonicalRemoteTarget &&
+    Boolean(legacyRemoteTarget) &&
+    canonicalMissingTargets.length === TARGETS.length;
 
   // A pending file was written before this script's own first remote mutation,
-  // so it is safe for resuming a partial run. A completed cache must not silently
-  // overwrite a partially rotated remote secret; pull/explicit input is required.
+  // so it is safe for resuming a partial run. A validated legacy cache is also
+  // safe when this is a clean old-only -> canonical migration. A completed cache
+  // must not overwrite a partially rotated remote secret; pull/explicit input is required.
   if (
     localValue &&
-    (!hasRemoteValue || !hasMissingTarget || isPendingRecovery)
+    (
+      !hasRemoteValue ||
+      !hasMissingTarget ||
+      isPendingRecovery ||
+      isLegacyOnlyMigration
+    )
   ) {
     return localValue;
   }
@@ -497,7 +657,11 @@ async function resolveProvisioningValue({
   if (hasRemoteValue) {
     let value = null;
     try {
-      value = await remoteValue(name, status);
+      if (canonicalRemoteTarget) value = await remoteValue(name, status);
+      if (!value && legacyName && legacyStatus && legacyRemoteTarget) {
+        // backward-compat with the original elonfeedback naming
+        value = await remoteValue(legacyName, legacyStatus);
+      }
     } catch (error) {
       if (!promptWhenRemoteUnavailable) throw error;
     }
@@ -525,7 +689,7 @@ function blobStoreName(projectName) {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
-  return `${normalized || "elonfeedback"}-blob`;
+  return `${normalized || "humanfeedback"}-blob`;
 }
 
 function printBlobInstructions(projectName) {
@@ -541,14 +705,14 @@ function printBlobInstructions(projectName) {
 
 async function writeLocalEnvironment({ url, token, pin, linked, state }) {
   const content = [
-    "# elonfeedback local CLI settings — keep this file private",
+    "# humanfeedback local CLI settings — keep this file private",
     "# Setup metadata binds cached credentials to one Vercel project.",
     `${LOCAL_PROJECT_ID}=${dotenvValue(linked.projectId)}`,
     `${LOCAL_ORG_ID}=${dotenvValue(linked.orgId)}`,
     `${LOCAL_SETUP_STATE}=${state}`,
-    `ELONFEEDBACK_URL=${dotenvValue(url)}`,
-    `ELONFEEDBACK_TOKEN=${dotenvValue(token)}`,
-    `ELON_PIN=${dotenvValue(pin)}`,
+    `HUMANFEEDBACK_URL=${dotenvValue(url)}`,
+    `HUMANFEEDBACK_TOKEN=${dotenvValue(token)}`,
+    `HUMANFEEDBACK_PIN=${dotenvValue(pin)}`,
     "",
   ].join("\n");
   const tempPath = `${LOCAL_ENV_FILE}.${process.pid}.${randomBytes(5).toString("hex")}.tmp`;
@@ -615,9 +779,9 @@ async function writeSensitiveHandoff({ url, token, pin }) {
   const message = [
     "",
     "아래 세 줄을 필요할 때 ~/.env에 복사하세요:",
-    `ELONFEEDBACK_URL=${dotenvValue(url)}`,
-    `ELONFEEDBACK_TOKEN=${dotenvValue(token)}`,
-    `ELON_PIN=${dotenvValue(pin)}`,
+    `HUMANFEEDBACK_URL=${dotenvValue(url)}`,
+    `HUMANFEEDBACK_TOKEN=${dotenvValue(token)}`,
+    `HUMANFEEDBACK_PIN=${dotenvValue(pin)}`,
     "",
   ].join("\n");
 
@@ -652,28 +816,34 @@ function printPlan() {
   console.log("  • 로컬 .vercel/project.json 연결 확인");
   console.log("  • Blob 및 필수 환경 변수 3개 환경 확인");
   console.log("  • 누락 값만 추가하고 기존 값은 강제 덮어쓰지 않음");
-  console.log("  • 일반 실행에서만 Production 배포 및 .elonfeedback.env 작성");
+  console.log("  • 일반 실행에서만 Production 배포 및 .humanfeedback.env 작성");
 }
 
 async function checkOnly() {
-  console.log("elonfeedback 설정 사전 점검 (--check, 변경 없음)\n");
+  console.log("humanfeedback 설정 사전 점검 (--check, 변경 없음)\n");
   printPlan();
 
   logStep(1, "Vercel 준비 상태 확인");
   await requireVercel();
-  await requireLogin();
+  const account = await requireLogin();
 
   logStep(2, "현재 폴더의 프로젝트 연결 확인");
   const linked = await readLink();
+  const projectIntent = await readProjectIntent();
+  validateProjectIntent(projectIntent, account, linked);
   const localValues = await readLocalEnv();
   if (!linked) {
     if (hasLocalEnvironmentState(localValues)) {
       console.log(
-        "  ! 프로젝트 연결은 없지만 이전 .elonfeedback.env가 있습니다. 일반 실행은 안전을 위해 자동 링크하지 않습니다.",
+        "  ! 프로젝트 연결은 없지만 이전 로컬 설정이 있습니다. 일반 실행은 안전을 위해 자동 링크하지 않습니다.",
       );
       console.log("    `vercel link`로 원래 프로젝트를 선택하거나 파일을 백업한 뒤 이동하세요.");
     } else {
-      console.log("  ! 연결되지 않음 — 일반 실행은 `vercel link --yes`를 실행합니다.");
+      console.log(
+        projectIntent
+          ? `  ! 연결되지 않음 — 일반 실행은 개인 스코프 '${account}'의 '${projectIntent.projectName}' 프로젝트를 다시 연결합니다.`
+          : `  ! 연결되지 않음 — 일반 실행은 개인 스코프 '${account}'에 랜덤 고유 이름의 새 프로젝트를 연결합니다.`,
+      );
     }
     console.log("\n점검 완료: 로그인됨, 프로젝트 연결 필요. 어떤 변경도 하지 않았습니다.");
     return;
@@ -695,12 +865,12 @@ async function checkOnly() {
 }
 
 async function provision() {
-  console.log("elonfeedback 개인 인스턴스 설정을 시작합니다.");
+  console.log("humanfeedback 개인 인스턴스 설정을 시작합니다.");
   console.log(`대상 폴더: ${ROOT}`);
 
   logStep(1, "Vercel CLI 및 로그인 확인");
   await requireVercel();
-  await requireLogin();
+  const account = await requireLogin();
 
   logStep(2, "현재 폴더의 Vercel 프로젝트 연결");
   const localValues = await readLocalEnv();
@@ -710,7 +880,7 @@ async function provision() {
         "먼저 `vercel link`로 원래 프로젝트를 직접 선택하거나, 파일을 안전한 곳에 백업한 뒤 이동하세요. 자동으로 새 프로젝트를 만들지 않았습니다.",
     );
   }
-  const linked = await ensureLinkedProject();
+  const linked = await ensureLinkedProject(account);
   validateLocalEnvironment(localValues, linked);
 
   logStep(3, "Blob 저장소 및 환경 변수 확인");
@@ -756,21 +926,25 @@ async function provision() {
     console.log("  ✓ OPENAI_API_KEY가 세 환경에 모두 있어 기존 값을 보존합니다.");
   }
   const apiToken = await resolveProvisioningValue({
-    name: "ELONFEEDBACK_TOKEN",
-    status: status.ELONFEEDBACK_TOKEN,
+    name: "HUMANFEEDBACK_TOKEN",
+    status: status.HUMANFEEDBACK_TOKEN,
+    legacyName: LEGACY_ENV_NAMES.token,
+    legacyStatus: status[LEGACY_ENV_NAMES.token],
     localValues,
     generate: generateToken,
   });
   const pin = await resolveProvisioningValue({
-    name: "ELON_PIN",
-    status: status.ELON_PIN,
+    name: "HUMANFEEDBACK_PIN",
+    status: status.HUMANFEEDBACK_PIN,
+    legacyName: LEGACY_ENV_NAMES.pin,
+    legacyStatus: status[LEGACY_ENV_NAMES.pin],
     localValues,
     generate: generatePin,
   });
 
   const credentialsNeedRemoteWrite =
-    missingTargets(status.ELONFEEDBACK_TOKEN).length > 0 ||
-    missingTargets(status.ELON_PIN).length > 0;
+    missingTargets(status.HUMANFEEDBACK_TOKEN).length > 0 ||
+    missingTargets(status.HUMANFEEDBACK_PIN).length > 0;
   const recoveryState =
     localValues[LOCAL_SETUP_STATE] === "complete" &&
     !credentialsNeedRemoteWrite
@@ -780,8 +954,14 @@ async function provision() {
   // Persist resolved credentials before the first remote write. If a
   // later env-add or deployment fails, a rerun can recover Sensitive values
   // without generating a mismatched token/PIN. The final URL is written below.
+  // backward-compat with the original elonfeedback naming
+  const cachedUrl =
+    process.env.HUMANFEEDBACK_URL?.trim() ||
+    process.env[LEGACY_ENV_NAMES.url]?.trim() ||
+    localValues.HUMANFEEDBACK_URL ||
+    "";
   await writeLocalEnvironment({
-    url: localValues.ELONFEEDBACK_URL || "",
+    url: cachedUrl,
     token: apiToken,
     pin,
     linked,
@@ -789,8 +969,12 @@ async function provision() {
   });
   console.log("  ✓ 재실행용 token/PIN을 권한 0600 로컬 파일에 안전하게 보관했습니다.");
 
-  await fillMissingTargets("ELONFEEDBACK_TOKEN", status.ELONFEEDBACK_TOKEN, apiToken);
-  await fillMissingTargets("ELON_PIN", status.ELON_PIN, pin);
+  await fillMissingTargets(
+    "HUMANFEEDBACK_TOKEN",
+    status.HUMANFEEDBACK_TOKEN,
+    apiToken,
+  );
+  await fillMissingTargets("HUMANFEEDBACK_PIN", status.HUMANFEEDBACK_PIN, pin);
   console.log(`  ✓ API token: ${maskSecret(apiToken)}`);
   console.log(`  ✓ PIN: ${maskSecret(pin)}`);
 

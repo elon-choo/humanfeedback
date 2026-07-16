@@ -96,7 +96,7 @@ export type AnswerComposerProps = {
 
 const SEGMENT_MS = 60_000;
 const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-const RECORDING_COORDINATION_EVENT = "elonfeedback:recording-coordination";
+const RECORDING_COORDINATION_EVENT = "humanfeedback:recording-coordination";
 const MIC_FALLBACK_HINT = "이 환경은 마이크가 안 돼요 — 아래에 번호나 메모를 입력하세요";
 const ATTACHMENT_ACCEPT = [
   "image/*",

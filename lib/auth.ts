@@ -2,7 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-export const PIN_COOKIE_NAME = "elon_pin";
+export const PIN_COOKIE_NAME = "hf_pin";
+// backward-compat with the original elonfeedback naming
+const LEGACY_PIN_COOKIE_NAME = "elon_pin";
 
 type RequestLike = Pick<Request, "headers">;
 
@@ -44,7 +46,9 @@ function readCookie(request: RequestLike, name: string): string | null {
 }
 
 export function hasValidBearer(request: RequestLike): boolean {
-  const expected = process.env.ELONFEEDBACK_TOKEN;
+  // backward-compat with the original elonfeedback naming
+  const expected =
+    process.env.HUMANFEEDBACK_TOKEN || process.env.ELONFEEDBACK_TOKEN;
   if (!expected) return false;
 
   const authorization = request.headers.get("authorization");
@@ -58,8 +62,13 @@ export function requireBearer(request: RequestLike): NextResponse | null {
 }
 
 export function hasPin(request: RequestLike): boolean {
-  const expected = process.env.ELON_PIN;
+  // backward-compat with the original elonfeedback naming
+  const expected = process.env.HUMANFEEDBACK_PIN || process.env.ELON_PIN;
   if (!expected) return false;
 
-  return safeStringEqual(readCookie(request, PIN_COOKIE_NAME), expected);
+  // backward-compat with the original elonfeedback naming
+  return (
+    safeStringEqual(readCookie(request, PIN_COOKIE_NAME), expected) ||
+    safeStringEqual(readCookie(request, LEGACY_PIN_COOKIE_NAME), expected)
+  );
 }

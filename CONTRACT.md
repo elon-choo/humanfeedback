@@ -1,18 +1,17 @@
-# elonfeedback — SHARED CONTRACT (single source of truth)
+# humanfeedback — SHARED CONTRACT (single source of truth)
 
 This file is the interface both sides implement against:
 - **The Next.js app** (this repo, deployed to Vercel) renders pages + serves the API.
-- **The local Claude Code CLI** (`~/.claude/bin/elonfeedback`) posts requests and picks up answers.
+- **The local Claude Code CLI** (`humanfeedback`) posts requests and picks up answers.
 
 If you change a shape here, change both sides.
 
 ## 0. Purpose
 
-Elon (non-developer, vibe-coder, businessman) runs 10+ projects. When Claude Code needs a
-*meaningful* human decision, instead of blocking inline it publishes a **rich, dopamine-framed
-decision page** to this app. Elon opens the URL on phone/desktop, taps a big number OR speaks
-into the mic (voice is auto-transcribed, large recordings supported), and the answer is saved.
-Claude picks the answer up asynchronously later.
+When an AI assistant needs a *meaningful* human decision, instead of blocking inline it publishes
+a **rich, clearly framed decision page** to this app. The owner opens the URL on phone or desktop,
+taps a big number or speaks into the mic (voice is auto-transcribed, large recordings supported),
+and the answer is saved. The assistant picks the answer up asynchronously later.
 
 ## 1. Storage: Vercel Blob (single store)
 
@@ -42,13 +41,13 @@ No SQL DB. Everything is JSON/binary objects in one Blob store.
   "createdAt": "2026-07-14T09:12:00+09:00",// set by SERVER
   "answeredAt": null,                      // set by SERVER when first answer arrives
   "cwd": "/home/you/work/funnelchat",     // project dir that posted it (for local pickup filter)
-  "machine": "elon-mac",                   // hostname
+  "machine": "owner-mac",                  // hostname
   "sessionId": "3f2a…uuid",               // OPTIONAL: Claude Code session UUID (CLAUDE_CODE_SESSION_ID)
                                            //   set by the CLI. Lets the watcher route the answer back
                                            //   to the exact posting session; falls back to cwd if the
                                            //   session is gone. Many sessions can share one cwd, so this
                                            //   + the slug-in-scrollback fingerprint is what disambiguates.
-  "sessionLabel": "퍼널챗 기억 하네스",     // OPTIONAL: human-readable context label shown to Elon
+  "sessionLabel": "퍼널챗 기억 하네스",     // OPTIONAL: human-readable context label shown to the owner
   "title": "결제 실패 시 자동 재시도, 몇 번까지 할까?",   // <= 80 chars, plain language
   "tldr": "한 문장 요약 — 지금 뭘 정해야 하는지",
   "whyNow": "지금 이 결정이 필요한 이유 (한두 문장)",
@@ -74,7 +73,7 @@ No SQL DB. Everything is JSON/binary objects in one Blob store.
 
 Server assigns `slug/date/seq/createdAt/status`. Client sends the rest (may send `date` hint).
 
-## 3. Answer JSON (written by the app when Elon answers)
+## 3. Answer JSON (written by the app when the owner answers)
 
 ```jsonc
 {
@@ -94,7 +93,7 @@ Server assigns `slug/date/seq/createdAt/status`. Client sends the rest (may send
 ## 4. HTTP API
 
 Auth model:
-- **Bearer** `Authorization: Bearer <ELONFEEDBACK_TOKEN>` → machine endpoints (CLI). Bypasses PIN.
+- **Bearer** `Authorization: Bearer <HUMANFEEDBACK_TOKEN>` → machine endpoints (CLI). Bypasses PIN.
 - **PIN cookie** → browser endpoints (pages + answer POST). Middleware redirects to `/unlock` if missing.
 
 | method | path | auth | body / returns |
@@ -105,7 +104,7 @@ Auth model:
 | POST | `/api/upload` | PIN | Vercel Blob **client upload** token handler (`handleUpload`) so the browser streams large audio directly to Blob (multipart, unbounded). Returns client token. |
 | GET  | `/api/answers` | Bearer | query `?cwd=&project=&since=&unpickedOnly=1`. Returns `{ items: [{ request, answers:[...] }] }`. |
 | POST | `/api/answers/pickup` | Bearer | body `{ slugs: [...] }` → set `pickedUp:true` on those answers. Returns `{ updated }`. |
-| POST | `/api/auth` | — | body `{ pin }` → sets `elon_pin` httpOnly cookie if matches `ELON_PIN`. |
+| POST | `/api/auth` | — | body `{ pin }` → sets `hf_pin` httpOnly cookie if it matches `HUMANFEEDBACK_PIN`. |
 
 STT: OpenAI `gpt-4o-transcribe` (fallback `whisper-1`), language hint `ko`. Each uploaded segment is
 a standalone webm/opus < 24MB, so per-request limits are never hit; long recordings arrive as many segments.
@@ -114,15 +113,15 @@ a standalone webm/opus < 24MB, so per-request limits are never hit; long recordi
 
 - `/` — **dashboard**: all `status:open` requests across every project, grouped by project,
   sorted urgency (high→low) then oldest-first. Each card: project badge, title, tldr, urgency dot,
-  age ("3시간 전"), big "답하러 가기" button. This is Elon's single "what needs me" inbox.
+  age ("3시간 전"), big "답하러 가기" button. This is the owner's single "what needs me" inbox.
 - `/[project]` — open requests for one project.
 - `/[project]/[date]/[seq]` — **the decision page** (see §6).
 - `/unlock` — PIN entry.
 
 ## 6. Decision page UX (the dopamine page) — REQUIREMENTS
 
-Audience: a smart non-developer businessman who defers decisions under cognitive load. Goals:
-make the decision feel *small, clear, and rewarding to resolve*.
+Audience: a busy person making decisions under cognitive load. Goals: make the decision feel
+*small, clear, and rewarding to resolve*.
 
 Must have, top to bottom:
 1. Project badge + urgency + age. Title (big). TLDR one-liner.
@@ -139,8 +138,8 @@ Must have, top to bottom:
    - **Mic button** — tap to record. Shows live elapsed timer + waveform/pulse. Handles long
      recordings via **segmented recording** (new MediaRecorder every ~60s; each segment uploaded
      to Blob via client `upload()` immediately). On stop → POST /api/answers with the segment urls →
-     server transcribes → shows transcript + detected number → Elon confirms or taps a number to override.
-   - Optional text box (fallback / when he'd rather type).
+     server transcribes → shows transcript + detected number → the owner confirms or taps a number to override.
+   - Optional text box (fallback / when they would rather type).
 9. After submit: friendly confirmation ("✅ 저장됐어요. 클로드가 이어서 진행합니다."), show what was saved.
 
 Design discipline: dark-friendly, mobile-first (he'll use phone), no generic AI-looking gradient soup,
@@ -151,14 +150,15 @@ number words (일/이/삼…, 하나/둘/셋…, 첫번째/두번째…).
 
 - `BLOB_READ_WRITE_TOKEN` — Blob store RW token (set by `vercel blob store add`).
 - `OPENAI_API_KEY` — STT.
-- `ELONFEEDBACK_TOKEN` — shared secret, CLI ↔ Bearer API.
-- `ELON_PIN` — phone unlock PIN.
+- `HUMANFEEDBACK_URL` — deployed app URL used by the local CLI.
+- `HUMANFEEDBACK_TOKEN` — shared secret, CLI ↔ Bearer API.
+- `HUMANFEEDBACK_PIN` — phone unlock PIN.
 
 ## 8.5 Secrets, attachments, text-only (ADDED — implement these too)
 
 ### 8.5.1 Secret / token handout (END-TO-END ENCRYPTED — security critical)
-Sometimes the decision requires Elon to hand Claude a secret (API token, password, OAuth code).
-The secret MUST be end-to-end encrypted: only Elon's local Mac can decrypt it. The Vercel server
+Sometimes a decision requires the owner to hand the AI assistant a secret (API token, password, OAuth code).
+The secret MUST be end-to-end encrypted: only the owner's local computer can decrypt it. The Vercel server
 and Blob store must NEVER see or store plaintext. Secrets are NEVER voiced/transcribed/logged.
 
 **Request JSON gains (optional):**
@@ -185,7 +185,7 @@ Server stores this array VERBATIM in the answer JSON. Server does not decrypt, p
 1. Import `recipientPubKey` (raw) as ECDH P-256 public key.
 2. `generateKey` ephemeral ECDH P-256 keypair; export ephemeral public as `raw` → base64 = `ephemeralPubKey`.
 3. `deriveBits({name:'ECDH', public: recipientKey}, ephemeralPriv, 256)` → 32-byte shared secret.
-4. HKDF-SHA256 over that 32 bytes: salt = empty (0 bytes), info = UTF8("elonfeedback-secret-v1"), length 256 bits → AES-256-GCM key.
+4. HKDF-SHA256 over that 32 bytes: salt = empty (0 bytes), info = UTF8("humanfeedback-secret-v1"), length 256 bits → AES-256-GCM key.
 5. 12-byte random IV. AAD = UTF8(`<slug>:<id>`). `encrypt({name:'AES-GCM', iv, additionalData: aad}, key, plaintextUtf8)`.
 6. Send `{id, alg, ephemeralPubKey, iv:b64, ciphertext:b64, aad}`. Zeroize the plaintext var after.
 

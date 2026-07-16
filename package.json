@@ -1,9 +1,9 @@
 {
-  "name": "elonfeedback",
+  "name": "humanfeedback",
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "elonfeedback": "bin/elonfeedback"
+    "humanfeedback": "bin/humanfeedback"
   },
   "scripts": {
     "dev": "next dev",

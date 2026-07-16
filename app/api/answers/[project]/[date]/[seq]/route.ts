@@ -70,7 +70,7 @@ function validateAudioUrls(
   for (let index = 0; index < audioUrls.length; index += 1) {
     const pathname = audioPathname(audioUrls[index]);
     if (!pathname || !pathname.startsWith(prefix)) {
-      return { error: "Every audio URL must belong to this request", answerId: null };
+      return { error: "Every audio URL must be associated with this request", answerId: null };
     }
 
     const filename = pathname.slice(prefix.length);
