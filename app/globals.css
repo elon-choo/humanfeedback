@@ -1,0 +1,256 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #f5f2ea;
+  --muted: #989a9f;
+  --dim: #686b72;
+  --canvas: #0b0d10;
+  --panel: #12151a;
+  --panel-raised: #181c22;
+  --line: #292d35;
+  --accent: #ff5a36;
+  --accent-pressed: #e94724;
+  --positive: #6ed69a;
+  --warning: #efb85d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--canvas);
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Noto Sans KR", "Segoe UI", sans-serif;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 48%, transparent);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+.site-shell {
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+.page-wrap {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 28px 18px 72px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.surface {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+}
+
+.prose-decision {
+  color: #d2d0ca;
+  font-size: 1rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.prose-decision > *:first-child {
+  margin-top: 0;
+}
+
+.prose-decision > *:last-child {
+  margin-bottom: 0;
+}
+
+.prose-decision h1,
+.prose-decision h2,
+.prose-decision h3 {
+  margin: 1.5em 0 0.55em;
+  color: var(--ink);
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.prose-decision h1 {
+  font-size: 1.35rem;
+}
+
+.prose-decision h2 {
+  font-size: 1.2rem;
+}
+
+.prose-decision h3 {
+  font-size: 1.08rem;
+}
+
+.prose-decision p,
+.prose-decision ul,
+.prose-decision ol,
+.prose-decision blockquote {
+  margin: 0.85em 0;
+}
+
+.prose-decision ul,
+.prose-decision ol {
+  padding-left: 1.35rem;
+}
+
+.prose-decision li + li {
+  margin-top: 0.35rem;
+}
+
+.prose-decision strong {
+  color: #fff;
+  font-weight: 800;
+}
+
+.prose-decision a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.prose-decision code {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #090b0e;
+  padding: 0.12em 0.35em;
+  color: #f2d9d2;
+  font-size: 0.9em;
+}
+
+.prose-decision pre {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #090b0e;
+  padding: 14px;
+}
+
+.prose-decision pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.prose-decision blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.recording-pulse {
+  animation: recording-pulse 1.35s ease-out infinite;
+}
+
+.wave-bar {
+  transform-origin: bottom;
+  animation: wave 780ms ease-in-out infinite alternate;
+}
+
+.success-pop {
+  animation: success-pop 360ms cubic-bezier(0.2, 0.9, 0.2, 1.15) both;
+}
+
+.lift-in {
+  animation: lift-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes recording-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 90, 54, 0.42);
+  }
+  75%,
+  100% {
+    box-shadow: 0 0 0 14px rgba(255, 90, 54, 0);
+  }
+}
+
+@keyframes wave {
+  from {
+    transform: scaleY(0.38);
+    opacity: 0.6;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes success-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lift-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 640px) {
+  .page-wrap {
+    padding: 42px 28px 96px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

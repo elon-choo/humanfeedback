@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.env*
+!.env.example
+.elonfeedback.env
+.vercel/
+npm-debug.log*
+.DS_Store
+*.tsbuildinfo
+.vercel
