@@ -23,6 +23,10 @@
 
 직접 하려면 `node scripts/setup.mjs` 한 방이면 됩니다. 자세한 건 [SETUP.md](./SETUP.md).
 
+**Claude Code 스킬로 받기:** [`skill/feedback-inbox-setup/SKILL.md`](./skill/feedback-inbox-setup/SKILL.md)
+파일을 팀원의 `~/.claude/skills/feedback-inbox-setup/SKILL.md` 로 복사하면, 팀원이 자기 Claude Code에
+"결정 인박스 깔아줘"라고만 해도 이 저장소를 받아 배포까지 이끌어줍니다.
+
 ## 구성
 
 - **웹앱** (Next.js, Vercel 배포) — 대시보드 + 결정 페이지 + 답변 저장.
