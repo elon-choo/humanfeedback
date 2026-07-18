@@ -229,6 +229,10 @@ export async function POST(request: Request, context: RouteContext) {
     audioUrls,
     durationSec: input.durationSec ?? 0,
     pickedUp: false,
+    // Server-stamped, never from the client body: which credential authenticated
+    // THIS POST. hasPin() = owner PIN cookie (phone); otherwise the shared bearer
+    // token. A downstream that must prove a human answered requires "pin".
+    answeredVia: hasPin(request) ? "pin" : "bearer",
     ...(input.secrets !== undefined ? { secrets: input.secrets } : {}),
     ...(input.attachments !== undefined
       ? { attachments: input.attachments }

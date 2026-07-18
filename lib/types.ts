@@ -92,6 +92,12 @@ export interface DecisionAnswer {
   audioUrls: string[];
   durationSec: number;
   pickedUp: boolean;
+  // Server-stamped at answer time: which credential authenticated this answer.
+  // "pin" = the owner's PIN cookie (phone); "bearer" = the shared API token.
+  // Consumers that must prove a HUMAN answered (not an automated token holder)
+  // require answeredVia === "pin". Absent on answers written before this field
+  // existed → treat as unproven (fail-closed).
+  answeredVia?: "pin" | "bearer";
   secrets?: EncryptedSecret[];
   attachments?: AnswerAttachment[];
 }
