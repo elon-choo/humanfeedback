@@ -28,6 +28,42 @@ function blobToken(): string {
   return token;
 }
 
+// List endpoints fan readJson/list out to one Blob API call per stored card,
+// unbounded. Past a few hundred blobs the API rate-limits, and the
+// Promise.allSettled callers silently drop the failed reads — newest cards then
+// vanish from every list/inbox/wait/pickup response (observed 2026-08-06 when
+// the store crossed ~400 request blobs). Bound the concurrency and retry
+// transient failures so reads stay complete instead of randomly truncated.
+const BLOB_CALL_CONCURRENCY = 8;
+let activeBlobCalls = 0;
+const blobCallWaiters: Array<() => void> = [];
+
+async function withBlobSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeBlobCalls >= BLOB_CALL_CONCURRENCY) {
+    await new Promise<void>((resolve) => blobCallWaiters.push(resolve));
+  }
+  activeBlobCalls += 1;
+  try {
+    return await task();
+  } finally {
+    activeBlobCalls -= 1;
+    blobCallWaiters.shift()?.();
+  }
+}
+
+async function withRetry<T>(task: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
 function kstParts(date: Date): Record<string, string> {
   return Object.fromEntries(
     kstFormatter
@@ -89,12 +125,16 @@ export async function readJson<T>(pathnameOrUrl: string): Promise<T> {
   // Blobs are public-access (see writeJson note); their URLs sit under an
   // unpublished store hostname, and the truly sensitive field (secrets) is
   // end-to-end encrypted, so plaintext here is a documented residual risk only.
-  const meta = await head(pathnameOrUrl, { token: blobToken() });
-  const res = await fetch(meta.url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Blob JSON not found: ${pathnameOrUrl} (${res.status})`);
-  }
-  return (await res.json()) as T;
+  return withBlobSlot(() =>
+    withRetry(async () => {
+      const meta = await head(pathnameOrUrl, { token: blobToken() });
+      const res = await fetch(meta.url, { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error(`Blob JSON not found: ${pathnameOrUrl} (${res.status})`);
+      }
+      return (await res.json()) as T;
+    }),
+  );
 }
 
 export async function writeJson(
@@ -125,12 +165,17 @@ export async function listPrefix(
   let cursor: string | undefined;
 
   do {
-    const page = await list({
-      prefix,
-      cursor,
-      limit: 1000,
-      token: blobToken(),
-    });
+    const pageCursor = cursor;
+    const page = await withBlobSlot(() =>
+      withRetry(() =>
+        list({
+          prefix,
+          cursor: pageCursor,
+          limit: 1000,
+          token: blobToken(),
+        }),
+      ),
+    );
     blobs.push(...page.blobs);
     cursor = page.hasMore ? page.cursor : undefined;
   } while (cursor);
