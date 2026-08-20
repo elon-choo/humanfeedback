@@ -247,7 +247,12 @@ export async function GET(request: Request) {
   const sessionId = searchParams.get("sessionId");
   const since = validSince(searchParams.get("since"));
 
-  if (status && status !== "open" && status !== "answered") {
+  if (
+    status &&
+    status !== "open" &&
+    status !== "answered" &&
+    status !== "dismissed"
+  ) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
   if (Number.isNaN(since)) {

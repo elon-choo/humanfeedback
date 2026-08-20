@@ -7,6 +7,7 @@ import {
   IgnoredCard,
   RecommendationCard,
 } from "@/components/decision-presentation";
+import { DismissControl } from "@/components/dismiss-controls";
 import { formatAge, UrgencyLabel } from "@/components/request-ui";
 import type { DecisionRequest } from "@/lib/types";
 
@@ -99,6 +100,22 @@ export function DecisionContent({ request }: { request: DecisionRequest }) {
         <RecommendationCard recommendation={request.recommendation} />
 
         <IgnoredCard ifIgnored={request.ifIgnored} />
+
+        <section
+          className="mt-10 rounded-[22px] border border-[#2d3138] bg-[#141519] p-5"
+          aria-label="이미 처리한 결정 치우기"
+        >
+          <h2 className="text-sm font-black text-[#c8c7c3]">
+            이 결정, 이미 다른 데서 해결됐나요?
+          </h2>
+          <p className="mt-1.5 text-xs font-semibold leading-5 text-[#83868d]">
+            치우면 인박스에서 사라지고 세션에도 더는 올라오지 않아요. 답한 것으로
+            기록되지는 않고, 잘못 눌렀으면 바로 되돌릴 수 있어요.
+          </p>
+          <div className="mt-3">
+            <DismissControl slug={request.slug} />
+          </div>
+        </section>
       </main>
 
       <AnswerComposer

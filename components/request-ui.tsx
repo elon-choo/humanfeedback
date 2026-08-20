@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DismissControl } from "@/components/dismiss-controls";
 import type { DecisionRequest, Urgency } from "@/lib/types";
 
 const urgencyMeta: Record<Urgency, { label: string; dot: string; text: string }> = {
@@ -63,6 +64,10 @@ export function RequestCard({ request }: { request: DecisionRequest }) {
         <span>이 결정만 답하기</span>
         <span aria-hidden="true">→</span>
       </Link>
+
+      <div className="mt-3 border-t border-[#292d34] pt-3">
+        <DismissControl slug={request.slug} />
+      </div>
     </article>
   );
 }

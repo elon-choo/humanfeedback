@@ -10,6 +10,7 @@ import {
   IgnoredCard,
   RecommendationCard,
 } from "@/components/decision-presentation";
+import { DismissControl } from "@/components/dismiss-controls";
 import {
   EmptyInbox,
   formatAge,
@@ -27,15 +28,19 @@ type BatchAnswerViewProps = {
 type BatchDecisionCardProps = {
   request: DecisionRequest;
   answered: boolean;
+  dismissed: boolean;
   renderedAt: number;
   onAnswered: (slug: string) => void;
+  onDismissedChange: (slug: string, dismissed: boolean) => void;
 };
 
 function BatchDecisionCard({
   request,
   answered,
+  dismissed,
   renderedAt,
   onAnswered,
+  onDismissedChange,
 }: BatchDecisionCardProps) {
   const idPrefix = `batch-${request.slug}`;
   const headingId = `${idPrefix.replaceAll("/", "-")}-title`;
@@ -46,7 +51,9 @@ function BatchDecisionCard({
       className={`surface overflow-hidden transition duration-300 ${
         answered
           ? "border-[#31513d] bg-[#101713] opacity-60"
-          : "border-[#30343b]"
+          : dismissed
+            ? "border-[#30343b] opacity-45"
+            : "border-[#30343b]"
       }`}
       aria-labelledby={headingId}
     >
@@ -183,6 +190,15 @@ function BatchDecisionCard({
             onAnswered={onAnswered}
           />
         </section>
+
+        {answered ? null : (
+          <div className="mt-4 border-t border-[#2b2f36] pt-4">
+            <DismissControl
+              slug={request.slug}
+              onStateChange={(next) => onDismissedChange(request.slug, next)}
+            />
+          </div>
+        )}
       </div>
     </article>
   );
@@ -197,6 +213,9 @@ export function BatchAnswerView({
   const [answeredSlugs, setAnsweredSlugs] = useState<Set<string>>(
     () => new Set(),
   );
+  const [dismissedSlugs, setDismissedSlugs] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const markAnswered = useCallback((slug: string) => {
     setAnsweredSlugs((current) => {
@@ -207,7 +226,20 @@ export function BatchAnswerView({
     });
   }, []);
 
-  const remaining = Math.max(0, requests.length - answeredSlugs.size);
+  const markDismissed = useCallback((slug: string, dismissed: boolean) => {
+    setDismissedSlugs((current) => {
+      if (current.has(slug) === dismissed) return current;
+      const next = new Set(current);
+      if (dismissed) next.add(slug);
+      else next.delete(slug);
+      return next;
+    });
+  }, []);
+
+  // A dismissed card is "off the list" just like an answered one — both stop
+  // counting toward what still needs the owner.
+  const settled = new Set([...answeredSlugs, ...dismissedSlugs]);
+  const remaining = Math.max(0, requests.length - settled.size);
 
   return (
     <main className="page-wrap">
@@ -258,8 +290,10 @@ export function BatchAnswerView({
               key={request.slug}
               request={request}
               answered={answeredSlugs.has(request.slug)}
+              dismissed={dismissedSlugs.has(request.slug)}
               renderedAt={renderedAt}
               onAnswered={markAnswered}
+              onDismissedChange={markDismissed}
             />
           ))}
         </div>

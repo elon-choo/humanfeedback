@@ -1,6 +1,9 @@
 export type Urgency = "low" | "medium" | "high";
 
-export type RequestStatus = "open" | "answered";
+/** "dismissed" = the owner cleared it without answering (already handled elsewhere).
+ *  Dismissed requests drop out of the open inbox but the blob is kept, so a
+ *  mis-tap is restorable (POST .../dismiss {restore:true}). */
+export type RequestStatus = "open" | "answered" | "dismissed";
 
 export type AnswerKind = "voice" | "text" | "number";
 
@@ -54,6 +57,12 @@ export interface DecisionRequest {
   urgency: Urgency;
   createdAt: string;
   answeredAt: string | null;
+  /** Set when status === "dismissed"; cleared on restore. Absent on older blobs. */
+  dismissedAt?: string | null;
+  /** Which credential dismissed it — "pin" = the owner in the browser, "bearer" =
+   *  an agent/CLI token. Mirrors DecisionAnswer.answeredVia so a cleared card is
+   *  auditable (an agent can never silently erase an owner decision). */
+  dismissedVia?: "pin" | "bearer";
   cwd: string;
   machine: string;
   /** Claude Code session UUID that posted this (CLAUDE_CODE_SESSION_ID), for precise
@@ -115,4 +124,30 @@ export interface CreateDecisionAnswer {
 export interface AnswerInboxItem {
   request: DecisionRequest;
   answers: DecisionAnswer[];
+}
+
+/** One rate-limit window for a Claude account (5h / 7d / Fable). */
+export interface UsageWindow {
+  pct: number;
+  resetsAt?: string;
+  countdown?: string;
+}
+
+/** One Claude account's live limit picture, pushed from the local cswap daemon. */
+export interface UsageAccount {
+  number: number;
+  email: string;
+  active: boolean;
+  fiveHour: UsageWindow | null;
+  sevenDay: UsageWindow | null;
+  fable: UsageWindow | null;
+}
+
+/** The latest account-usage snapshot shown at the top of the dashboard. */
+export interface UsageSnapshot {
+  accounts: UsageAccount[];
+  /** The pusher's own clock (best-effort). */
+  sourceUpdatedAt?: string;
+  /** Server receipt time (authoritative for staleness); null when no snapshot exists yet. */
+  receivedAt: string | null;
 }
