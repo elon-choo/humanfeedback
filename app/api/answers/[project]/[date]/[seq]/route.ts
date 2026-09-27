@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 import { hasPin, hasValidBearer } from "@/lib/auth";
 import {
   answerPath,
+  answerPrefix,
   getKstIso,
+  listPrefix,
   padSeq,
   requestPath,
   slugifyProject,
@@ -132,6 +134,47 @@ function validateBody(value: unknown): string | null {
     return "attachments must be an array";
   }
   return null;
+}
+
+// Answers for ONE request, bearer-only. GET /api/answers lists every request and every
+// answer blob (bounded Blob concurrency), which times out once the store holds hundreds
+// of cards; this path reads only ans/<slug>/ so a caller waiting on a single card stays fast.
+export async function GET(request: Request, context: RouteContext) {
+  if (!hasValidBearer(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { project: rawProject, date, seq: rawSeq } = await context.params;
+  let project: string;
+  try {
+    project = slugifyProject(rawProject);
+  } catch {
+    return NextResponse.json({ error: "Invalid project" }, { status: 400 });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{3}$/.test(rawSeq)) {
+    return NextResponse.json({ error: "Invalid request slug" }, { status: 400 });
+  }
+  const numericSeq = Number(rawSeq);
+  if (numericSeq < 1 || numericSeq > 999) {
+    return NextResponse.json({ error: "Invalid request slug" }, { status: 400 });
+  }
+  const slug = `${project}/${date}/${padSeq(numericSeq)}`;
+
+  try {
+    const blobs = (await listPrefix(answerPrefix(slug))).filter((blob) =>
+      blob.pathname.endsWith(".json"),
+    );
+    const settled = await Promise.allSettled(
+      blobs.map((blob) => readJson<DecisionAnswer>(blob.pathname)),
+    );
+    const answers = settled
+      .flatMap((result) => (result.status === "fulfilled" ? [result.value] : []))
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+    return NextResponse.json({ slug, answers, unreadable: blobs.length - answers.length });
+  } catch (error) {
+    console.error("Unable to read answers for", slug, error);
+    return NextResponse.json({ error: "Unable to read answers" }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request, context: RouteContext) {
