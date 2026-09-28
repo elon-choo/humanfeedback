@@ -1,7 +1,14 @@
+import type { ListBlobResultBlob } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 import { requireBearer } from "@/lib/auth";
-import { answerPrefix, listPrefix, listRequests, readJson } from "@/lib/blob";
+import {
+  listPrefix,
+  readListedBlobs,
+  readListedJson,
+  slugFromAnswerPath,
+  slugFromRequestPath,
+} from "@/lib/blob";
 import type {
   AnswerInboxItem,
   DecisionAnswer,
@@ -16,22 +23,12 @@ function parseSince(value: string | null): number | null {
   return Number.isNaN(timestamp) ? Number.NaN : timestamp;
 }
 
-async function answersForRequest(
-  request: DecisionRequest,
+async function readAnswers(
+  blobs: ListBlobResultBlob[],
   since: number | null,
   unpickedOnly: boolean,
 ): Promise<DecisionAnswer[]> {
-  const blobs = (await listPrefix(answerPrefix(request.slug))).filter((blob) =>
-    blob.pathname.endsWith(".json"),
-  );
-  const settled = await Promise.allSettled(
-    blobs.map((blob) => readJson<DecisionAnswer>(blob.pathname)),
-  );
-
-  return settled
-    .flatMap((result) =>
-      result.status === "fulfilled" ? [result.value] : [],
-    )
+  return (await readListedBlobs<DecisionAnswer>(blobs))
     .filter((answer) => !unpickedOnly || !answer.pickedUp)
     .filter(
       (answer) =>
@@ -55,17 +52,53 @@ export async function GET(request: Request) {
   }
 
   try {
-    const matchingRequests = (await listRequests())
-      .filter((item) => !cwd || item.cwd === cwd)
-      .filter((item) => !project || item.project === project);
+    // Two list calls for the whole store, then read only cards that have at
+    // least one answer blob. Listing ans/<slug>/ once per card plus a head()
+    // per blob took this route past the 300 s function limit (2026-09-27).
+    const [requestBlobs, answerBlobs] = await Promise.all([
+      listPrefix("req/"),
+      listPrefix("ans/"),
+    ]);
+
+    const answerBlobsBySlug = new Map<string, ListBlobResultBlob[]>();
+    for (const blob of answerBlobs) {
+      const slug = slugFromAnswerPath(blob.pathname);
+      if (!slug) continue;
+      const group = answerBlobsBySlug.get(slug);
+      if (group) group.push(blob);
+      else answerBlobsBySlug.set(slug, [blob]);
+    }
+
+    const answeredRequestBlobs = requestBlobs.flatMap((blob) => {
+      const slug = slugFromRequestPath(blob.pathname);
+      const answers = slug ? answerBlobsBySlug.get(slug) : undefined;
+      // A slug always starts with its project (POST builds it that way), so
+      // the project filter can skip reads here; it is re-checked on content.
+      if (!slug || !answers || (project && !slug.startsWith(`${project}/`))) {
+        return [];
+      }
+      return [{ blob, answers }];
+    });
+
+    const loaded = await Promise.allSettled(
+      answeredRequestBlobs.map(async ({ blob, answers }) => ({
+        decisionRequest: await readListedJson<DecisionRequest>(blob),
+        answerBlobs: answers,
+      })),
+    );
+    const matchingRequests = loaded
+      .flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      )
+      .filter(({ decisionRequest }) => !cwd || decisionRequest.cwd === cwd)
+      .filter(
+        ({ decisionRequest }) =>
+          !project || decisionRequest.project === project,
+      );
 
     const resolved = await Promise.all(
-      matchingRequests.map(async (decisionRequest) => {
-        const answers = await answersForRequest(
-          decisionRequest,
-          since,
-          unpickedOnly,
-        );
+      matchingRequests.map(async ({ decisionRequest, answerBlobs }) => {
+        const answers = await readAnswers(answerBlobs, since, unpickedOnly);
         const effectiveRequest: DecisionRequest =
           answers.length > 0 && decisionRequest.status !== "answered"
             ? {

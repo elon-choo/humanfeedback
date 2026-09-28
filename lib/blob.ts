@@ -35,21 +35,36 @@ function blobToken(): string {
 // the store crossed ~400 request blobs). Bound the concurrency and retry
 // transient failures so reads stay complete instead of randomly truncated.
 const BLOB_CALL_CONCURRENCY = 8;
-let activeBlobCalls = 0;
-const blobCallWaiters: Array<() => void> = [];
+// Reads of an already-listed blob fetch its public URL (CDN), which is not a
+// Blob API call, so they get a wider bound of their own. Routing them through
+// head() as well cost one rate-limited API call per card: at ~380 cards the
+// list endpoints took 109 s and /api/answers hit the 300 s limit (2026-09-27).
+const BLOB_FETCH_CONCURRENCY = 32;
 
-async function withBlobSlot<T>(task: () => Promise<T>): Promise<T> {
-  if (activeBlobCalls >= BLOB_CALL_CONCURRENCY) {
-    await new Promise<void>((resolve) => blobCallWaiters.push(resolve));
-  }
-  activeBlobCalls += 1;
-  try {
-    return await task();
-  } finally {
-    activeBlobCalls -= 1;
-    blobCallWaiters.shift()?.();
-  }
+function createLimiter(limit: number) {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) {
+      // The releasing task hands its slot over directly (active stays
+      // unchanged), so a newcomer cannot slip in between release and wake-up.
+      await new Promise<void>((resolve) => waiters.push(resolve));
+    } else {
+      active += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = waiters.shift();
+      if (next) next();
+      else active -= 1;
+    }
+  };
 }
+
+const withBlobSlot = createLimiter(BLOB_CALL_CONCURRENCY);
+const withFetchSlot = createLimiter(BLOB_FETCH_CONCURRENCY);
 
 async function withRetry<T>(task: () => Promise<T>): Promise<T> {
   let lastError: unknown;
@@ -137,6 +152,24 @@ export async function readJson<T>(pathnameOrUrl: string): Promise<T> {
   );
 }
 
+export async function readListedJson<T>(blob: ListBlobResultBlob): Promise<T> {
+  // list() already returned the blob URL, so skip head(). The version query
+  // changes on every overwrite: best-effort cache-busting against the 60 s
+  // CDN max-age writeJson sets. If the CDN ignores the query, reads are just
+  // as fresh as the old head()+fetch of the same URL, never staler.
+  const url = new URL(blob.url);
+  url.searchParams.set("v", String(new Date(blob.uploadedAt).getTime()));
+  return withFetchSlot(() =>
+    withRetry(async () => {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error(`Blob JSON not found: ${blob.pathname} (${res.status})`);
+      }
+      return (await res.json()) as T;
+    }),
+  );
+}
+
 export async function writeJson(
   pathname: string,
   value: unknown,
@@ -210,11 +243,30 @@ export async function listRequests(
   const blobs = (await listPrefix(prefix)).filter((blob) =>
     blob.pathname.endsWith(".json"),
   );
+  return readListedBlobs<DecisionRequest>(blobs);
+}
+
+export async function readListedBlobs<T>(
+  blobs: ListBlobResultBlob[],
+): Promise<T[]> {
   const settled = await Promise.allSettled(
-    blobs.map((blob) => readJson<DecisionRequest>(blob.pathname)),
+    blobs.map((blob) => readListedJson<T>(blob)),
   );
 
   return settled.flatMap((result) =>
     result.status === "fulfilled" ? [result.value] : [],
   );
+}
+
+// Inverse of requestPath(): "req/<slug>.json" -> "<slug>".
+export function slugFromRequestPath(pathname: string): string | null {
+  if (!pathname.startsWith("req/") || !pathname.endsWith(".json")) return null;
+  return pathname.slice("req/".length, -".json".length) || null;
+}
+
+// Inverse of answerPath(): "ans/<slug>/<answerId>.json" -> "<slug>".
+export function slugFromAnswerPath(pathname: string): string | null {
+  if (!pathname.startsWith("ans/") || !pathname.endsWith(".json")) return null;
+  const lastSlash = pathname.lastIndexOf("/");
+  return lastSlash > "ans/".length ? pathname.slice("ans/".length, lastSlash) : null;
 }
