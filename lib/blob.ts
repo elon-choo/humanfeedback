@@ -40,6 +40,97 @@ const BLOB_CALL_CONCURRENCY = 8;
 // head() as well cost one rate-limited API call per card: at ~380 cards the
 // list endpoints took 109 s and /api/answers hit the 300 s limit (2026-09-27).
 const BLOB_FETCH_CONCURRENCY = 32;
+// The list endpoints used to re-fetch every stored card on every call. The
+// 20 s watcher poll alone read ~1,800 blob URLs 4,320 times a day, and each
+// read is a billed CDN request (~$25/day by 2026-10-10). A blob's content only
+// changes when it is overwritten, which moves its etag and uploadedAt, so the
+// body is remembered per pathname+version and only changed blobs are fetched
+// again. A stale remembered answer (pickedUp: false) would put an already
+// handled decision back in a session's inbox, so a body is only remembered
+// when all of these hold:
+// - the blob was at least SETTLE old when the request started (a read racing
+//   an overwrite can be served the previous body for the 60 s CDN max-age);
+// - the served ETag equals the listed etag, when both are present;
+// - this instance wrote no blob while the request was in flight;
+// and it is re-read TTL after its request started regardless, which bounds
+// whatever those checks miss, e.g. a listing that keeps reporting the previous
+// version after an overwrite made by another function instance. ~1,800 blobs
+// per 15 min is under 200k fetches a day per instance, against 12 million
+// before.
+const LISTED_CACHE_SETTLE_MS = 5 * 60_000;
+const LISTED_CACHE_TTL_MS = 15 * 60_000;
+// Safety valve only: ~1,500 cards are a few MB of JSON text.
+const LISTED_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+
+type ListedJsonCache = {
+  entries: Map<string, { version: string; text: string; expiresAt: number }>;
+  chars: number;
+  fetched: number;
+  cached: number;
+  etagMismatch: number;
+  etagUnchecked: number;
+  // Bumped by every writeJson in this instance.
+  writeEpoch: number;
+};
+
+// Kept on globalThis so every route bundle in one function instance shares it.
+const listedCacheHolder = globalThis as typeof globalThis & {
+  __listedJsonCache?: ListedJsonCache;
+};
+const listedCache: ListedJsonCache = (listedCacheHolder.__listedJsonCache ??= {
+  entries: new Map(),
+  chars: 0,
+  fetched: 0,
+  cached: 0,
+  etagMismatch: 0,
+  etagUnchecked: 0,
+  writeEpoch: 0,
+});
+
+function normalizeEtag(value: string | null | undefined): string {
+  return (value ?? "").replace(/^W\//, "").replace(/"/g, "");
+}
+
+function forgetListedJson(pathname: string): void {
+  const previous = listedCache.entries.get(pathname);
+  if (!previous) return;
+  listedCache.chars -= previous.text.length;
+  listedCache.entries.delete(pathname);
+}
+
+function invalidateListedJson(pathname: string): void {
+  listedCache.writeEpoch += 1;
+  forgetListedJson(pathname);
+}
+
+function rememberListedJson(
+  pathname: string,
+  version: string,
+  text: string,
+  requestedAt: number,
+): void {
+  forgetListedJson(pathname);
+  // Counted from when the request started, not from when the body arrived: a
+  // slow response must not outlive the bound. Jittered so the entries filled
+  // by one cold call do not all expire in the same later call.
+  const expiresAt =
+    requestedAt + LISTED_CACHE_TTL_MS * (0.75 + Math.random() * 0.5);
+  if (expiresAt <= Date.now()) return;
+  if (text.length > LISTED_CACHE_MAX_CHARS) return;
+  if (listedCache.chars + text.length > LISTED_CACHE_MAX_CHARS) {
+    listedCache.entries.clear();
+    listedCache.chars = 0;
+  }
+  listedCache.entries.set(pathname, { version, text, expiresAt });
+  listedCache.chars += text.length;
+}
+
+// Running totals for this function instance, sent as the x-blob-reads header
+// so a caller can see that repeat calls stop fetching. Not a billing count:
+// failed attempts are not included.
+export function listedReadStats(): string {
+  return `fetched=${listedCache.fetched};cached=${listedCache.cached};entries=${listedCache.entries.size};etagMismatch=${listedCache.etagMismatch};etagUnchecked=${listedCache.etagUnchecked}`;
+}
 
 function createLimiter(limit: number) {
   let active = 0;
@@ -153,19 +244,53 @@ export async function readJson<T>(pathnameOrUrl: string): Promise<T> {
 }
 
 export async function readListedJson<T>(blob: ListBlobResultBlob): Promise<T> {
+  const uploadedAt = new Date(blob.uploadedAt).getTime();
+  const listedEtag = normalizeEtag(blob.etag);
+  const version = `${listedEtag}@${uploadedAt}`;
+  const remembered = listedCache.entries.get(blob.pathname);
+  if (
+    remembered &&
+    remembered.version === version &&
+    Date.now() < remembered.expiresAt
+  ) {
+    listedCache.cached += 1;
+    // Parsed per call so callers never share one object.
+    return JSON.parse(remembered.text) as T;
+  }
+
   // list() already returned the blob URL, so skip head(). The version query
   // changes on every overwrite: best-effort cache-busting against the 60 s
   // CDN max-age writeJson sets. If the CDN ignores the query, reads are just
   // as fresh as the old head()+fetch of the same URL, never staler.
   const url = new URL(blob.url);
-  url.searchParams.set("v", String(new Date(blob.uploadedAt).getTime()));
+  url.searchParams.set("v", String(uploadedAt));
   return withFetchSlot(() =>
     withRetry(async () => {
+      // Decided before the request: a slow response must not turn a body read
+      // inside the settle window, or across a write, into a remembered one.
+      const requestedAt = Date.now();
+      const settled = requestedAt - uploadedAt >= LISTED_CACHE_SETTLE_MS;
+      const writeEpoch = listedCache.writeEpoch;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) {
         throw new Error(`Blob JSON not found: ${blob.pathname} (${res.status})`);
       }
-      return (await res.json()) as T;
+      const text = await res.text();
+      const value = JSON.parse(text) as T;
+      listedCache.fetched += 1;
+      const servedEtag = normalizeEtag(res.headers.get("etag"));
+      const sameVersion =
+        !listedEtag || !servedEtag || listedEtag === servedEtag;
+      if (!sameVersion) listedCache.etagMismatch += 1;
+      else if (!listedEtag || !servedEtag) listedCache.etagUnchecked += 1;
+      if (
+        settled &&
+        sameVersion &&
+        writeEpoch === listedCache.writeEpoch
+      ) {
+        rememberListedJson(blob.pathname, version, text, requestedAt);
+      }
+      return value;
     }),
   );
 }
@@ -174,6 +299,19 @@ export async function writeJson(
   pathname: string,
   value: unknown,
 ): Promise<void> {
+  // Before and after the write, also when put() throws (the store may have
+  // accepted the body): no read in flight across it is remembered, and nothing
+  // remembered for this pathname survives it. Covers this instance only; other
+  // instances rely on the checks in readListedJson.
+  invalidateListedJson(pathname);
+  try {
+    await putJson(pathname, value);
+  } finally {
+    invalidateListedJson(pathname);
+  }
+}
+
+async function putJson(pathname: string, value: unknown): Promise<void> {
   await put(pathname, JSON.stringify(value), {
     // NOTE: the provisioned Blob store is a PUBLIC store, so private access is
     // not available (audio/attachments also need public URLs). Request/answer

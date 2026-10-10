@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireBearer } from "@/lib/auth";
 import {
   listPrefix,
+  listedReadStats,
   readListedBlobs,
   readListedJson,
   slugFromAnswerPath,
@@ -123,7 +124,10 @@ export async function GET(request: Request) {
           Date.parse(right.answers[0].createdAt),
       );
 
-    return NextResponse.json({ items });
+    return NextResponse.json(
+      { items },
+      { headers: { "x-blob-reads": listedReadStats() } },
+    );
   } catch (error) {
     console.error("Unable to list answers", error);
     return NextResponse.json(

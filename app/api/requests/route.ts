@@ -5,6 +5,7 @@ import {
   getKstDate,
   getKstIso,
   listRequests,
+  listedReadStats,
   nextSeq,
   padSeq,
   requestPath,
@@ -276,7 +277,10 @@ export async function GET(request: Request) {
         return Date.parse(left.createdAt) - Date.parse(right.createdAt);
       });
 
-    return NextResponse.json({ requests });
+    return NextResponse.json(
+      { requests },
+      { headers: { "x-blob-reads": listedReadStats() } },
+    );
   } catch (error) {
     console.error("Unable to list decision requests", error);
     return NextResponse.json(
