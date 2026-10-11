@@ -90,6 +90,11 @@ check("a literal # in a title is not a number: 승인 # is not a copy of 승인 
   assert.deepEqual(views([card("p", "승인 #", 3 * DAY), card("p", "승인 1", 2 * DAY), card("p", "승인 2", DAY)]), ["active", "active", "active"]);
 });
 
+check("a control character in a title is not read as a number either", () => {
+  assert.deepEqual(views([card("p", "승인 \u0001", 3 * DAY), card("p", "승인 1", 2 * DAY), card("p", "승인 2", DAY)]), ["active", "active", "active"]);
+  assert.deepEqual(views([card("p", "줄바꿈\n제목", 2 * DAY), card("p", "줄바꿈 제목", DAY)]), ["superseded", "active"]);
+});
+
 check("Korean titles in NFC and NFD are the same title", () => {
   assert.deepEqual(views([card("p", "결제 승인".normalize("NFD"), 2 * DAY), card("p", "결제 승인".normalize("NFC"), DAY)]), ["superseded", "active"]);
 });

@@ -299,13 +299,11 @@ export async function POST(request: Request, context: RouteContext) {
             },
       );
     } catch (error) {
-      // The answer is stored; never fail it over the status line.
-      console.error("Conditional status update failed for", slug, error);
-      await writeJson(requestPath(slug), {
-        ...decisionRequest,
-        status: "answered",
-        answeredAt: decisionRequest.answeredAt ?? createdAt,
-      } satisfies DecisionRequest);
+      // The answer is stored, and the answer lists derive "answered" from it,
+      // so the answer stands. Writing an old snapshot back here would undo
+      // whatever changed the card meanwhile; the card stays listed as open
+      // until the next answer or a retry marks it.
+      console.error("Answer saved, but the card status was not updated:", slug, error);
     }
   } catch (error) {
     console.error("Unable to save answer", error);

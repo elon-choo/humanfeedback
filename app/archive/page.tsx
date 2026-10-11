@@ -28,6 +28,20 @@ type ArchivePageProps = {
 // One automated alert reached 309 copies; listing them all made the page heavy
 // enough to misrender on a slow connection.
 const REPEAT_ROWS = 20;
+// Same idea for the dormant and dismissed lists of one project.
+const LIST_ROWS = 50;
+
+function MoreLink({ project, hidden }: { project: string; hidden: number }) {
+  if (hidden <= 0) return null;
+  return (
+    <Link
+      href={`/archive?project=${encodeURIComponent(project)}&all=1`}
+      className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-[#92959c] transition-colors hover:text-white"
+    >
+      {hidden}장 더 보기 <span aria-hidden="true">→</span>
+    </Link>
+  );
+}
 
 const backLink =
   "inline-flex min-h-11 items-center gap-2 rounded-xl pr-3 text-sm font-bold text-[#92959c] transition-colors hover:text-white";
@@ -207,7 +221,7 @@ async function ArchiveProject({ project, all }: { project: string; all: boolean 
         note="올라온 지 일주일이 넘었거나 나중에 보겠다고 옮긴 카드입니다. 아직 필요한 카드는 「다시 꺼내기」를 누르면 첫 화면에 계속 보입니다."
       >
         <ul className="surface px-5">
-          {dormant.map((request) => (
+          {(all ? dormant : dormant.slice(0, LIST_ROWS)).map((request) => (
             <Row key={request.slug} request={request} now={now}>
               <VisibilityControl
                 slug={request.slug}
@@ -218,6 +232,7 @@ async function ArchiveProject({ project, all }: { project: string; all: boolean 
             </Row>
           ))}
         </ul>
+        {all ? null : <MoreLink project={project} hidden={dormant.length - LIST_ROWS} />}
       </Section>
 
       <Section
@@ -292,12 +307,13 @@ async function ArchiveProject({ project, all }: { project: string; all: boolean 
         note="「이미 처리했어요」로 치운 카드입니다. 잘못 치웠으면 되돌릴 수 있어요."
       >
         <ul className="surface px-5">
-          {dismissed.map((request) => (
+          {(all ? dismissed : dismissed.slice(0, LIST_ROWS)).map((request) => (
             <Row key={request.slug} request={request} now={now}>
               <DismissControl slug={request.slug} initiallyDismissed />
             </Row>
           ))}
         </ul>
+        {all ? null : <MoreLink project={project} hidden={dismissed.length - LIST_ROWS} />}
       </Section>
     </main>
   );

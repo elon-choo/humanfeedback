@@ -35,7 +35,13 @@ export interface CardLifecycle {
 export type ListedDecisionRequest = DecisionRequest & Partial<CardLifecycle>;
 
 function normalizeTitle(title: string): string {
-  return title.normalize("NFKC").replace(/\s+/g, " ").trim();
+  return title
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    // Other control characters carry nothing a reader sees, and \u0001
+    // stands for a number below.
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim();
 }
 
 function createdMs(request: DecisionRequest): number {

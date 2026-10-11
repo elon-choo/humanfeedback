@@ -314,6 +314,7 @@ export async function writeJson(
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const CREATE_DEADLINE_MS = Number(process.env.BLOB_CREATE_DEADLINE_MS) || 8_000;
 
 export function isBlobNotFound(error: unknown): boolean {
   return error instanceof BlobNotFoundError;
@@ -323,24 +324,33 @@ export function isBlobNotFound(error: unknown): boolean {
 // head() with whatever the public URL serves, and for up to the 60 s CDN
 // max-age that can be the body from before the last overwrite: a route that
 // decides from it ("already parked", "still open") then acts on an old card.
-// Here the body only counts when its ETag is the one head() reported.
+// Here the body only counts when both sides report an ETag and they are the
+// same; without them the version cannot be told, so the read fails instead of
+// guessing. Transient failures are retried; a missing blob is not.
 async function readVersionedJson<T>(
   pathname: string,
-): Promise<{ value: T; etag: string | undefined }> {
+): Promise<{ value: T; etag: string }> {
+  let lastProblem = "";
   for (let attempt = 0; ; attempt += 1) {
-    const meta = await withBlobSlot(() => head(pathname, { token: blobToken() }));
-    const url = new URL(meta.url);
-    url.searchParams.set("v", String(new Date(meta.uploadedAt).getTime()));
-    const res = await fetch(url, { cache: "no-store" });
-    const listedEtag = normalizeEtag(meta.etag);
-    const servedEtag = normalizeEtag(res.headers.get("etag"));
-    if (res.ok && (!listedEtag || !servedEtag || listedEtag === servedEtag)) {
-      return { value: (await res.json()) as T, etag: meta.etag };
+    try {
+      const meta = await withBlobSlot(() => head(pathname, { token: blobToken() }));
+      const url = new URL(meta.url);
+      url.searchParams.set("v", String(new Date(meta.uploadedAt).getTime()));
+      const res = await fetch(url, { cache: "no-store" });
+      const listedEtag = normalizeEtag(meta.etag);
+      const servedEtag = normalizeEtag(res.headers.get("etag"));
+      if (res.ok && listedEtag && listedEtag === servedEtag) {
+        return { value: (await res.json()) as T, etag: meta.etag };
+      }
+      lastProblem = res.ok
+        ? `version not confirmed (head ${listedEtag || "none"}, served ${servedEtag || "none"})`
+        : `HTTP ${res.status}`;
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) throw error;
+      lastProblem = String((error as Error)?.message ?? error);
     }
     if (attempt >= 5) {
-      throw new Error(
-        `Blob JSON not readable at its current version: ${pathname} (${res.status})`,
-      );
+      throw new Error(`Blob JSON not readable at its current version: ${pathname} (${lastProblem})`);
     }
     await sleep(200 * (attempt + 1));
   }
@@ -363,7 +373,7 @@ export async function updateJson<T>(
 
     invalidateListedJson(pathname);
     try {
-      await putJson(pathname, next, etag ? { ifMatch: etag } : {});
+      await putJson(pathname, next, { ifMatch: etag });
       return { value: next, written: true };
     } catch (error) {
       if (!(error instanceof BlobPreconditionFailedError) || attempt >= 5) {
@@ -389,13 +399,27 @@ export async function createJson<T>(
   isOwn: (stored: T) => boolean,
 ): Promise<boolean> {
   invalidateListedJson(pathname);
+  // Bounded: if the store reports "exists" with a code the client retries,
+  // the put would otherwise back off for half an hour. The client stops
+  // retrying on an AbortError only (AbortSignal.timeout() raises a
+  // TimeoutError, which it retries), so abort by hand, and do not wait past
+  // the deadline for the attempt in flight either.
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`create timed out: ${pathname}`));
+    }, CREATE_DEADLINE_MS);
+  });
   try {
-    // Bounded: if the store reports "exists" with a code the client retries,
-    // the put would otherwise back off for minutes before failing.
-    await putJson(pathname, value, {
-      allowOverwrite: false,
-      abortSignal: AbortSignal.timeout(8_000),
-    });
+    await Promise.race([
+      putJson(pathname, value, {
+        allowOverwrite: false,
+        abortSignal: controller.signal,
+      }),
+      deadline,
+    ]);
     return true;
   } catch (error) {
     // "Already exists" and "stored, but the response was lost" both arrive
@@ -408,6 +432,7 @@ export async function createJson<T>(
     }
     return isOwn(stored);
   } finally {
+    clearTimeout(timer);
     invalidateListedJson(pathname);
   }
 }

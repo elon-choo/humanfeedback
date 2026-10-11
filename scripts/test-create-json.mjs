@@ -23,6 +23,10 @@ class BlobPreconditionFailedError extends Error {}
 
 // pathname -> { body, version }. The ETag is the version number.
 const store = new Map();
+const headWithoutEtag = new Set(); // head() reports no ETag for these
+const servedWithoutEtag = new Set(); // the CDN serves no ETag header for these
+const transientFailures = new Map(); // pathname -> number of head() calls that throw a network error first
+let putNeverSettles = false; // put() only ends when its abortSignal fires (as an AbortError, like the client)
 const putLog = [];
 const listHides = new Set(); // pathnames list() does not report yet
 const staleCdn = new Map(); // pathname -> { body, version, serves } : the CDN answers with this old copy `serves` more times
@@ -38,9 +42,11 @@ globalThis.__blobClient = {
   BlobPreconditionFailedError,
   del: null,
   head: async (pathname) => {
+    const failures = transientFailures.get(pathname) ?? 0;
+    if (failures > 0) { transientFailures.set(pathname, failures - 1); throw new TypeError("fetch failed"); }
     const blob = store.get(pathname);
     if (!blob) throw new BlobNotFoundError(`not found: ${pathname}`);
-    return { url: `https://store.example/${pathname}`, uploadedAt: new Date(blob.version * 1000), etag: `"v${blob.version}"` };
+    return { url: `https://store.example/${pathname}`, uploadedAt: new Date(blob.version * 1000), etag: headWithoutEtag.has(pathname) ? undefined : `"v${blob.version}"` };
   },
   list: async ({ prefix }) => ({
     blobs: [...store.keys()]
@@ -50,6 +56,12 @@ globalThis.__blobClient = {
   }),
   put: async (pathname, body, options) => {
     putLog.push({ pathname, allowOverwrite: options.allowOverwrite, ifMatch: options.ifMatch, bounded: options.abortSignal instanceof AbortSignal });
+    if (putNeverSettles) {
+      return new Promise((_, reject) => options.abortSignal.addEventListener("abort", () => {
+        abortReasons.push(options.abortSignal.reason?.name);
+        reject(options.abortSignal.reason);
+      }));
+    }
     if (!options.allowOverwrite && store.has(pathname)) throw new Error("blob already exists");
     if (options.ifMatch) {
       if (beforePut) { const run = beforePut; beforePut = null; run(); }
@@ -62,6 +74,7 @@ globalThis.__blobClient = {
     if (behaviour !== "store") throw new Error("response lost");
   },
 };
+const abortReasons = [];
 const broken = new Set(); // pathnames whose URL answers 500
 const fetchLog = [];
 globalThis.fetch = async (input) => {
@@ -75,12 +88,13 @@ globalThis.fetch = async (input) => {
     return new Response(stale.body, { status: 200, headers: { etag: `"v${stale.version}"` } });
   }
   const blob = store.get(pathname);
-  return new Response(blob.body, { status: 200, headers: { etag: `"v${blob.version}"` } });
+  return new Response(blob.body, { status: 200, headers: servedWithoutEtag.has(pathname) ? {} : { etag: `"v${blob.version}"` } });
 };
 // The retries and collision waits back off for real time; only outcomes matter here.
 const realSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (callback, _ms, ...args) => realSetTimeout(callback, 0, ...args);
 process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+process.env.BLOB_CREATE_DEADLINE_MS = "300";
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`;
 const { createJson, createRequestAtNextSeq, updateJson, writeJson, isBlobNotFound, readListedBlobs, listRequests, newListCompleteness, listCompletenessHeader } = await import(moduleUrl);
@@ -195,6 +209,19 @@ await check("gives up after 25 taken numbers instead of looping", async () => {
   listHides.clear();
 });
 
+await check("a put that never answers is aborted at the deadline with an AbortError, then the stored state decides", async () => {
+  putNeverSettles = true;
+  const started = Date.now();
+  // Nothing stored: the deadline error surfaces.
+  await assert.rejects(createJson("req/p/2026-10-11/020.json", { creationId: "G" }, own("G")), /timed out|not found/);
+  assert.ok(Date.now() - started < 5_000, "returned near the deadline");
+  assert.equal(abortReasons.at(-1), "AbortError", "the client stops retrying only on AbortError");
+  // Stored by this caller but the answer never came: counted as written.
+  seed("req/p/2026-10-11/021.json", { creationId: "H" });
+  assert.equal(await createJson("req/p/2026-10-11/021.json", { creationId: "H" }, own("H")), true);
+  putNeverSettles = false;
+});
+
 // ---- changing a card
 
 await check("writeJson still replaces unconditionally (answer blobs, pickups)", async () => {
@@ -263,6 +290,26 @@ await check("a body that never matches its version is an error, not a guess", as
   await assert.rejects(updateJson("req/u/5.json", (current) => ({ ...current, x: 1 })), /not readable at its current version/);
   assert.equal(putLog.length, puts);
   staleCdn.clear();
+});
+
+await check("no ETag from head() or from the CDN: nothing is written, the read fails", async () => {
+  for (const [label, set] of [["head", headWithoutEtag], ["served", servedWithoutEtag]]) {
+    seed(`req/u/noetag-${label}.json`, { status: "answered" });
+    set.add(`req/u/noetag-${label}.json`);
+    const puts = putLog.length;
+    await assert.rejects(updateJson(`req/u/noetag-${label}.json`, (current) => ({ ...current, status: "open" })), /not readable at its current version/);
+    assert.equal(putLog.length, puts, label);
+    assert.equal(stored(`req/u/noetag-${label}.json`).status, "answered");
+    set.clear();
+  }
+});
+
+await check("a transient network failure on the read is retried", async () => {
+  seed("req/u/flaky.json", { status: "open" });
+  transientFailures.set("req/u/flaky.json", 2);
+  const result = await updateJson("req/u/flaky.json", (current) => ({ ...current, visibility: "keep" }));
+  assert.equal(result.written, true);
+  assert.equal(stored("req/u/flaky.json").visibility, "keep");
 });
 
 await check("a writer that always loses the race gives up with the conflict, and a missing blob is recognisable", async () => {
