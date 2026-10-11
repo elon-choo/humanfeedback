@@ -48,6 +48,7 @@ type ReviewAnswer = {
 
 type SavedAnswer = {
   kind: AnswerKind;
+  answerId?: string;
   chosenOption: number | null;
   transcript?: string;
   text?: string;
@@ -849,9 +850,10 @@ export function AnswerComposer({
     setBusyLabel(`${chosenOption}번으로 저장하는 중…`);
     try {
       const body = await prepareAnswerBody({ kind: "number", chosenOption });
-      await postAnswer(body);
+      const response = await postAnswer(body);
       completeAnswer({
         kind: "number",
+        answerId: response.answerId,
         chosenOption,
         secretCount: body.secrets?.length,
         attachmentCount: body.attachments?.length,
@@ -1024,6 +1026,7 @@ export function AnswerComposer({
   const recommendedOption = options.find((option) => option.recommended);
   const askWhy =
     saved?.kind === "number" &&
+    Boolean(saved.answerId) &&
     recommendedOption !== undefined &&
     selectedOption !== undefined &&
     selectedOption.n !== recommendedOption.n;
@@ -1031,12 +1034,22 @@ export function AnswerComposer({
   async function sendReason(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const reason = reasonText.trim();
-    if (!reason || !saved?.chosenOption || reasonPhase !== "idle") return;
+    if (!reason || !saved?.answerId || reasonPhase !== "idle") return;
     setReasonPhase("sending");
     setError("");
     try {
-      // Same number again, so the reason can never be read as a different choice.
-      await postAnswer({ kind: "text", chosenOption: saved.chosenOption, text: reason });
+      // Attached to the answer just given, not posted as a new one: a new answer
+      // would count as the latest choice and could undo a later correction.
+      const response = await fetch(`${endpoint}/reason`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answerId: saved.answerId, reason }),
+      });
+      if (response.status === 401) {
+        window.location.assign(`/unlock?next=${encodeURIComponent(window.location.pathname)}`);
+        throw new Error("잠금이 만료되어 다시 확인이 필요해요.");
+      }
+      if (!response.ok) throw new Error("이유를 남기지 못했어요. 고르신 번호는 이미 저장됐어요.");
       setReasonPhase("sent");
     } catch (reasonError) {
       setReasonPhase("idle");
@@ -1427,7 +1440,7 @@ export function AnswerComposer({
 
           {phase === "success" && askWhy ? (
             reasonPhase === "sent" ? (
-              <p className="pb-2 text-xs font-bold text-[#78dca1]">고마워요. 다음 카드부터 참고할게요.</p>
+              <p className="pb-2 text-xs font-bold text-[#78dca1]">이유도 남겨 두었어요.</p>
             ) : (
               <form onSubmit={sendReason} className="pb-2">
                 <label htmlFor={`${instanceId}-reason`} className="block text-xs font-bold leading-5 text-[#a9abb0]">
@@ -1438,6 +1451,7 @@ export function AnswerComposer({
                     id={`${instanceId}-reason`}
                     value={reasonText}
                     onChange={(event) => setReasonText(event.target.value)}
+                    disabled={reasonPhase === "sending"}
                     maxLength={500}
                     placeholder="예: 지금은 비용보다 속도가 중요해서"
                     className="min-h-11 min-w-0 flex-1 rounded-xl border border-[#3a3e46] bg-[#14171c] px-3 text-sm font-semibold text-[#ece9e2] placeholder:text-[#5f6269] focus:border-[#ff5a36] focus:outline-none"

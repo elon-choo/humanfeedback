@@ -61,7 +61,7 @@ function BatchDecisionCard({
     <article
       className={`surface overflow-hidden transition duration-300 ${
         answered
-          ? "border-[#31513d] bg-[#101713] opacity-60"
+          ? "border-[#31513d] bg-[#101713]"
           : dismissed || parked
             ? "border-[#30343b] opacity-45"
             : "border-[#30343b]"

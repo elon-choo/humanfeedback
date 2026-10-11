@@ -131,6 +131,9 @@ export interface DecisionAnswer {
   // require answeredVia === "pin". Absent on answers written before this field
   // existed → treat as unproven (fail-closed).
   answeredVia?: "pin" | "bearer";
+  /** Set when the owner added a one-line reason to a number answer afterwards
+   *  (the reason itself is stored in `text`). */
+  reasonAt?: string;
   secrets?: EncryptedSecret[];
   attachments?: AnswerAttachment[];
 }
