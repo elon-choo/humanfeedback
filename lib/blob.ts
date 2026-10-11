@@ -1,4 +1,6 @@
 import {
+  BlobNotFoundError,
+  BlobPreconditionFailedError,
   del,
   head,
   list,
@@ -311,29 +313,100 @@ export async function writeJson(
   }
 }
 
-// Stores a blob that must not exist yet. true = this body is what is stored;
-// false = the pathname already holds something else. Two posts for the same
-// project and day can be handed the same sequence number (nextSeq is a list
-// followed by max+1), and writeJson would let the second silently replace the
-// first card.
-export async function createJson(
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function isBlobNotFound(error: unknown): boolean {
+  return error instanceof BlobNotFoundError;
+}
+
+// The stored body together with the version it belongs to. readJson() pairs a
+// head() with whatever the public URL serves, and for up to the 60 s CDN
+// max-age that can be the body from before the last overwrite: a route that
+// decides from it ("already parked", "still open") then acts on an old card.
+// Here the body only counts when its ETag is the one head() reported.
+async function readVersionedJson<T>(
   pathname: string,
-  value: unknown,
+): Promise<{ value: T; etag: string | undefined }> {
+  for (let attempt = 0; ; attempt += 1) {
+    const meta = await withBlobSlot(() => head(pathname, { token: blobToken() }));
+    const url = new URL(meta.url);
+    url.searchParams.set("v", String(new Date(meta.uploadedAt).getTime()));
+    const res = await fetch(url, { cache: "no-store" });
+    const listedEtag = normalizeEtag(meta.etag);
+    const servedEtag = normalizeEtag(res.headers.get("etag"));
+    if (res.ok && (!listedEtag || !servedEtag || listedEtag === servedEtag)) {
+      return { value: (await res.json()) as T, etag: meta.etag };
+    }
+    if (attempt >= 5) {
+      throw new Error(
+        `Blob JSON not readable at its current version: ${pathname} (${res.status})`,
+      );
+    }
+    await sleep(200 * (attempt + 1));
+  }
+}
+
+// Read-modify-write that cannot put an old copy back. Three routes rewrite a
+// request blob (answer, dismiss, visibility); with plain read + writeJson, one
+// that read before another's write restored its stale snapshot afterwards —
+// an answered card went back to "open". The write here only lands if the blob
+// is still the version that was read; otherwise it is read again and `mutate`
+// reapplied. `mutate` returns null when there is nothing to change.
+export async function updateJson<T>(
+  pathname: string,
+  mutate: (current: T) => T | null,
+): Promise<{ value: T; written: boolean }> {
+  for (let attempt = 0; ; attempt += 1) {
+    const { value: current, etag } = await readVersionedJson<T>(pathname);
+    const next = mutate(current);
+    if (next === null) return { value: current, written: false };
+
+    invalidateListedJson(pathname);
+    try {
+      await putJson(pathname, next, etag ? { ifMatch: etag } : {});
+      return { value: next, written: true };
+    } catch (error) {
+      if (!(error instanceof BlobPreconditionFailedError) || attempt >= 5) {
+        throw error;
+      }
+      await sleep(50 + Math.random() * 150);
+    } finally {
+      invalidateListedJson(pathname);
+    }
+  }
+}
+
+// Stores a blob that must not exist yet. true = this caller's body is what is
+// stored; false = the pathname already holds someone else's. Two posts for
+// the same project and day can be handed the same sequence number (nextSeq is
+// a list followed by max+1), and writeJson would let the second silently
+// replace the first card. `isOwn` recognises this caller's write in what is
+// stored: by then the body may already differ (the card was answered), so it
+// compares an id the caller put in, not the whole body.
+export async function createJson<T>(
+  pathname: string,
+  value: T,
+  isOwn: (stored: T) => boolean,
 ): Promise<boolean> {
   invalidateListedJson(pathname);
   try {
-    await putJson(pathname, value, false);
+    // Bounded: if the store reports "exists" with a code the client retries,
+    // the put would otherwise back off for minutes before failing.
+    await putJson(pathname, value, {
+      allowOverwrite: false,
+      abortSignal: AbortSignal.timeout(8_000),
+    });
     return true;
   } catch (error) {
     // "Already exists" and "stored, but the response was lost" both arrive
     // here as a failed put, so decide from what is stored now.
-    let stored: unknown;
+    let stored: T;
     try {
-      stored = await readJson<unknown>(pathname);
+      stored = (await readVersionedJson<T>(pathname)).value;
     } catch {
       throw error;
     }
-    return JSON.stringify(stored) === JSON.stringify(value);
+    return isOwn(stored);
   } finally {
     invalidateListedJson(pathname);
   }
@@ -342,7 +415,11 @@ export async function createJson(
 async function putJson(
   pathname: string,
   value: unknown,
-  allowOverwrite = true,
+  options: {
+    allowOverwrite?: boolean;
+    ifMatch?: string;
+    abortSignal?: AbortSignal;
+  } = {},
 ): Promise<void> {
   await put(pathname, JSON.stringify(value), {
     // NOTE: the provisioned Blob store is a PUBLIC store, so private access is
@@ -354,7 +431,9 @@ async function putJson(
     // single-user tool; upgrade path = a private store + authed media proxy.
     access: "public",
     addRandomSuffix: false,
-    allowOverwrite,
+    allowOverwrite: options.allowOverwrite ?? true,
+    ...(options.ifMatch ? { ifMatch: options.ifMatch } : {}),
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     contentType: "application/json; charset=utf-8",
     cacheControlMaxAge: 60,
     token: blobToken(),
@@ -408,9 +487,10 @@ export async function nextSeq(project: string, date: string): Promise<number> {
 }
 
 // Stores a new card under the next free sequence number for (project, date).
-// The number is only taken once the write went through: when another post got
-// there first, the number after it is tried.
-export async function createRequestAtNextSeq<T>(
+// The number is only taken once the write went through; when another post got
+// there first the next number is tried, with a short random wait so posts that
+// collided once do not collide on every following number too.
+export async function createRequestAtNextSeq<T extends { creationId: string }>(
   project: string,
   date: string,
   build: (slug: string, seq: number) => T,
@@ -418,11 +498,16 @@ export async function createRequestAtNextSeq<T>(
   let seq = await nextSeq(project, date);
   for (let attempt = 0; ; attempt += 1) {
     const slug = `${project}/${date}/${padSeq(seq)}`;
-    if (await createJson(requestPath(slug), build(slug, seq))) {
-      return { slug, seq };
-    }
-    if (attempt >= 4) throw new Error(`No free sequence number at ${slug}`);
-    seq = Math.max(seq + 1, await nextSeq(project, date));
+    const value = build(slug, seq);
+    const created = await createJson(
+      requestPath(slug),
+      value,
+      (stored) => stored?.creationId === value.creationId,
+    );
+    if (created) return { slug, seq };
+    if (attempt >= 24) throw new Error(`No free sequence number at ${slug}`);
+    seq += 1;
+    await sleep(Math.random() * 120);
   }
 }
 

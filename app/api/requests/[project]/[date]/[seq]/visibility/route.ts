@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import { hasPin, hasValidBearer } from "@/lib/auth";
 import {
   getKstIso,
+  isBlobNotFound,
   padSeq,
-  readJson,
   requestPath,
   slugifyProject,
-  writeJson,
+  updateJson,
 } from "@/lib/blob";
 import type { DecisionRequest } from "@/lib/types";
 
@@ -70,44 +70,42 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  let decisionRequest: DecisionRequest;
+  // Decided inside updateJson, on the version that is then written: an answer
+  // or a dismissal landing in between is seen, not overwritten.
+  let closed = false;
   try {
-    decisionRequest = await readJson<DecisionRequest>(requestPath(slug));
-  } catch {
-    return NextResponse.json({ error: "Request not found" }, { status: 404 });
-  }
+    await updateJson<DecisionRequest>(requestPath(slug), (current) => {
+      closed = current.status !== "open";
+      // Idempotent: a double-tap (or a retried request) is not an error.
+      if (closed || (current.visibility ?? "auto") === visibility) return null;
 
-  if (decisionRequest.status !== "open") {
-    return NextResponse.json(
-      { error: "Only open decisions have a list placement" },
-      { status: 409 },
-    );
-  }
-
-  const current = decisionRequest.visibility ?? "auto";
-  if (current === visibility) {
-    // Idempotent: a double-tap (or a retried request) is not an error.
-    return NextResponse.json({ ok: true, slug, visibility });
-  }
-
-  const updated: DecisionRequest = { ...decisionRequest };
-  if (visibility === "auto") {
-    delete updated.visibility;
-    delete updated.visibilitySetAt;
-    delete updated.visibilitySetVia;
-  } else {
-    updated.visibility = visibility;
-    updated.visibilitySetAt = getKstIso();
-    updated.visibilitySetVia = viaPin ? "pin" : "bearer";
-  }
-
-  try {
-    await writeJson(requestPath(slug), updated);
+      const updated: DecisionRequest = { ...current };
+      if (visibility === "auto") {
+        delete updated.visibility;
+        delete updated.visibilitySetAt;
+        delete updated.visibilitySetVia;
+      } else {
+        updated.visibility = visibility;
+        updated.visibilitySetAt = getKstIso();
+        updated.visibilitySetVia = viaPin ? "pin" : "bearer";
+      }
+      return updated;
+    });
   } catch (error) {
+    if (isBlobNotFound(error)) {
+      return NextResponse.json({ error: "Request not found" }, { status: 404 });
+    }
     console.error("Unable to update visibility", error);
     return NextResponse.json(
       { error: "Unable to update request" },
       { status: 500 },
+    );
+  }
+
+  if (closed) {
+    return NextResponse.json(
+      { error: "Only open decisions have a list placement" },
+      { status: 409 },
     );
   }
 

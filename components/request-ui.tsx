@@ -11,6 +11,13 @@ const urgencyMeta: Record<Urgency, { label: string; dot: string; text: string }>
   low: { label: "여유 있음", dot: "bg-[#6d737d]", text: "text-[#a5a8ae]" },
 };
 
+const kstMonthDay = new Intl.DateTimeFormat("ko-KR", {
+  // Fixed zone: the server (UTC) and the phone must print the same day.
+  timeZone: "Asia/Seoul",
+  month: "short",
+  day: "numeric",
+});
+
 export function formatAge(value: string, now = Date.now()) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "방금 등록";
@@ -23,9 +30,9 @@ export function formatAge(value: string, now = Date.now()) {
   if (hours < 24) return `${hours}시간 전`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}일 전`;
-  return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(
-    new Date(timestamp),
-  );
+  // Same day on the server (UTC) and the phone; the batch view renders this
+  // on both, and a card kept in the main list can be weeks old.
+  return kstMonthDay.format(timestamp);
 }
 
 export function UrgencyLabel({ urgency, compact = false }: { urgency: Urgency; compact?: boolean }) {
@@ -38,16 +45,19 @@ export function UrgencyLabel({ urgency, compact = false }: { urgency: Urgency; c
   );
 }
 
+/** "10월 6일", or null for a date that cannot be read (Intl throws on those). */
+export function formatKstDay(value: string): string | null {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? kstMonthDay.format(timestamp) : null;
+}
+
 // "같은 카드 12번째 · 9월 6일부터": this card was posted again and its older
 // copies sit in the archive.
 export function GroupBadge({ group }: { group: CardGroup }) {
-  const since = new Intl.DateTimeFormat("ko-KR", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(group.firstCreatedAt));
+  const since = formatKstDay(group.firstCreatedAt);
   return (
     <span className="rounded-full border border-[#3d3a2c] bg-[#1c1a12] px-2.5 py-1 text-[0.68rem] font-black text-[#d9c27a]">
-      같은 카드 {group.count}번째 · {since}부터
+      같은 카드 {group.count}번째{since ? ` · ${since}부터` : ""}
     </span>
   );
 }
@@ -96,20 +106,21 @@ export function RequestCard({ request }: { request: ListedDecisionRequest }) {
 
 // One line above the list: what the main list leaves out, and where it went.
 export function ArchiveLink({
-  dormant,
-  superseded,
+  hidden,
+  project,
 }: {
-  dormant: number;
-  superseded: number;
+  hidden: { dormant: number; superseded: number; dismissed: number };
+  project?: string;
 }) {
-  if (dormant + superseded === 0) return null;
   const parts = [
-    dormant > 0 ? `오래 기다린 카드 ${dormant}장` : null,
-    superseded > 0 ? `반복해서 올라온 카드 ${superseded}장` : null,
+    hidden.dormant > 0 ? `오래 기다린 카드 ${hidden.dormant}장` : null,
+    hidden.superseded > 0 ? `반복해서 올라온 카드 ${hidden.superseded}장` : null,
+    hidden.dismissed > 0 ? `치운 카드 ${hidden.dismissed}장` : null,
   ].filter(Boolean);
+  if (parts.length === 0) return null;
   return (
     <Link
-      href="/archive"
+      href={project ? `/archive?project=${encodeURIComponent(project)}` : "/archive"}
       className="mb-8 flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-[#30343b] bg-[#14171c] px-5 py-3 text-sm font-bold leading-6 text-[#a9abb0] transition-colors hover:border-[#545963] hover:text-white"
     >
       <span>
@@ -118,6 +129,16 @@ export function ArchiveLink({
       </span>
       <span aria-hidden="true">→</span>
     </Link>
+  );
+}
+
+// Some card files could not be read this time, so the list is short.
+export function PartialNotice({ partial }: { partial: boolean }) {
+  if (!partial) return null;
+  return (
+    <div className="mb-6 rounded-2xl border border-[#5b452c] bg-[#1c1711] px-4 py-3 text-sm font-semibold leading-6 text-[#e7bd7b]">
+      카드 일부를 읽지 못했어요. 지금 보이는 목록과 숫자가 실제보다 적을 수 있습니다. 잠시 뒤 새로고침해 주세요.
+    </div>
   );
 }
 

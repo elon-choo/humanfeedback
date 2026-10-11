@@ -16,6 +16,7 @@ import {
   EmptyInbox,
   formatAge,
   GroupBadge,
+  PartialNotice,
   UrgencyLabel,
 } from "@/components/request-ui";
 import type { HiddenCounts } from "@/components/server-data";
@@ -26,6 +27,7 @@ type BatchAnswerViewProps = {
   project: string;
   requests: ListedDecisionRequest[];
   hidden: HiddenCounts;
+  partial: boolean;
   unavailable: boolean;
   renderedAt: number;
 };
@@ -34,18 +36,22 @@ type BatchDecisionCardProps = {
   request: ListedDecisionRequest;
   answered: boolean;
   dismissed: boolean;
+  parked: boolean;
   renderedAt: number;
   onAnswered: (slug: string) => void;
   onDismissedChange: (slug: string, dismissed: boolean) => void;
+  onParkedChange: (slug: string, parked: boolean) => void;
 };
 
 function BatchDecisionCard({
   request,
   answered,
   dismissed,
+  parked,
   renderedAt,
   onAnswered,
   onDismissedChange,
+  onParkedChange,
 }: BatchDecisionCardProps) {
   const idPrefix = `batch-${request.slug}`;
   const headingId = `${idPrefix.replaceAll("/", "-")}-title`;
@@ -56,7 +62,7 @@ function BatchDecisionCard({
       className={`surface overflow-hidden transition duration-300 ${
         answered
           ? "border-[#31513d] bg-[#101713] opacity-60"
-          : dismissed
+          : dismissed || parked
             ? "border-[#30343b] opacity-45"
             : "border-[#30343b]"
       }`}
@@ -203,12 +209,11 @@ function BatchDecisionCard({
               slug={request.slug}
               onStateChange={(next) => onDismissedChange(request.slug, next)}
             />
-            {/* Parked counts like dismissed here: off this list either way. */}
             <VisibilityControl
               slug={request.slug}
               action="park"
               previous={request.visibility ?? "auto"}
-              onStateChange={(next) => onDismissedChange(request.slug, next)}
+              onStateChange={(next) => onParkedChange(request.slug, next)}
             />
           </div>
         )}
@@ -221,6 +226,7 @@ export function BatchAnswerView({
   project,
   requests,
   hidden,
+  partial,
   unavailable,
   renderedAt,
 }: BatchAnswerViewProps) {
@@ -250,9 +256,22 @@ export function BatchAnswerView({
     });
   }, []);
 
-  // A dismissed card is "off the list" just like an answered one — both stop
-  // counting toward what still needs the owner.
-  const settled = new Set([...answeredSlugs, ...dismissedSlugs]);
+  // Kept apart from dismissed: a card can be both, and undoing one must not
+  // bring the card back while the other still holds.
+  const [parkedSlugs, setParkedSlugs] = useState<Set<string>>(() => new Set());
+  const markParked = useCallback((slug: string, parked: boolean) => {
+    setParkedSlugs((current) => {
+      if (current.has(slug) === parked) return current;
+      const next = new Set(current);
+      if (parked) next.add(slug);
+      else next.delete(slug);
+      return next;
+    });
+  }, []);
+
+  // A dismissed or parked card is "off the list" just like an answered one —
+  // none of them count toward what still needs the owner.
+  const settled = new Set([...answeredSlugs, ...dismissedSlugs, ...parkedSlugs]);
   const remaining = Math.max(0, requests.length - settled.size);
 
   return (
@@ -295,7 +314,8 @@ export function BatchAnswerView({
         </div>
       ) : null}
 
-      <ArchiveLink dormant={hidden.dormant} superseded={hidden.superseded} />
+      <PartialNotice partial={partial} />
+      <ArchiveLink hidden={hidden} project={project} />
 
       {requests.length === 0 ? (
         <EmptyInbox project={project} />
@@ -307,9 +327,11 @@ export function BatchAnswerView({
               request={request}
               answered={answeredSlugs.has(request.slug)}
               dismissed={dismissedSlugs.has(request.slug)}
+              parked={parkedSlugs.has(request.slug)}
               renderedAt={renderedAt}
               onAnswered={markAnswered}
               onDismissedChange={markDismissed}
+              onParkedChange={markParked}
             />
           ))}
         </div>

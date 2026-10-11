@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import { hasPin, hasValidBearer } from "@/lib/auth";
 import {
   getKstIso,
+  isBlobNotFound,
   padSeq,
-  readJson,
   requestPath,
   slugifyProject,
-  writeJson,
+  updateJson,
 } from "@/lib/blob";
 import type { DecisionRequest } from "@/lib/types";
 
@@ -64,41 +64,40 @@ export async function POST(request: Request, context: RouteContext) {
   }
   const restore = isRecord(body) && body.restore === true;
 
-  let decisionRequest: DecisionRequest;
-  try {
-    decisionRequest = await readJson<DecisionRequest>(requestPath(slug));
-  } catch {
-    return NextResponse.json({ error: "Request not found" }, { status: 404 });
-  }
-
-  if (decisionRequest.status === "answered") {
-    return NextResponse.json(
-      { error: "Answered decisions cannot be dismissed" },
-      { status: 409 },
-    );
-  }
-
   const nextStatus: DecisionRequest["status"] = restore ? "open" : "dismissed";
-  if (decisionRequest.status === nextStatus) {
-    // Idempotent: a double-tap (or a retried request) is not an error.
-    return NextResponse.json({ ok: true, slug, status: nextStatus });
-  }
-
-  const updated: DecisionRequest = {
-    ...decisionRequest,
-    status: nextStatus,
-    dismissedAt: restore ? null : getKstIso(),
-    ...(restore ? {} : { dismissedVia: viaPin ? "pin" : "bearer" }),
-  };
-  if (restore) delete updated.dismissedVia;
-
+  // Decided inside updateJson, on the version that is then written: a read
+  // from before an answer must not put "dismissed" (or "open") back over it.
+  let answered = false;
   try {
-    await writeJson(requestPath(slug), updated);
+    await updateJson<DecisionRequest>(requestPath(slug), (current) => {
+      answered = current.status === "answered";
+      // Idempotent: a double-tap (or a retried request) is not an error.
+      if (answered || current.status === nextStatus) return null;
+
+      const updated: DecisionRequest = {
+        ...current,
+        status: nextStatus,
+        dismissedAt: restore ? null : getKstIso(),
+        ...(restore ? {} : { dismissedVia: viaPin ? "pin" : "bearer" }),
+      };
+      if (restore) delete updated.dismissedVia;
+      return updated;
+    });
   } catch (error) {
+    if (isBlobNotFound(error)) {
+      return NextResponse.json({ error: "Request not found" }, { status: 404 });
+    }
     console.error("Unable to update dismissal", error);
     return NextResponse.json(
       { error: "Unable to update request" },
       { status: 500 },
+    );
+  }
+
+  if (answered) {
+    return NextResponse.json(
+      { error: "Answered decisions cannot be dismissed" },
+      { status: 409 },
     );
   }
 

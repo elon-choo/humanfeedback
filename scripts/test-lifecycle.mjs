@@ -5,7 +5,8 @@ import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import ts from "typescript";
 
-const source = await readFile(new URL("../lib/lifecycle.ts", import.meta.url), "utf8");
+// LIFECYCLE_SOURCE points at a deliberately broken copy when checking that a guard is really tested.
+const source = await readFile(process.env.LIFECYCLE_SOURCE ?? new URL("../lib/lifecycle.ts", import.meta.url), "utf8");
 const transpiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
   fileName: "lifecycle.ts",
@@ -83,6 +84,14 @@ check("three or more titles that differ only in numbers are one recurring alert"
   assert.deepEqual(cards.map((c) => lifecycles.get(c.slug).view), ["superseded", "superseded", "active"]);
   assert.deepEqual(cards.map((c) => lifecycles.get(c.slug).supersededBy), [cards[2].slug, cards[2].slug, undefined]);
   assert.deepEqual(lifecycles.get(cards[2].slug).group, { count: 3, firstCreatedAt: cards[0].createdAt });
+});
+
+check("a literal # in a title is not a number: 승인 # is not a copy of 승인 1, 승인 2", () => {
+  assert.deepEqual(views([card("p", "승인 #", 3 * DAY), card("p", "승인 1", 2 * DAY), card("p", "승인 2", DAY)]), ["active", "active", "active"]);
+});
+
+check("Korean titles in NFC and NFD are the same title", () => {
+  assert.deepEqual(views([card("p", "결제 승인".normalize("NFD"), 2 * DAY), card("p", "결제 승인".normalize("NFC"), DAY)]), ["superseded", "active"]);
 });
 
 check("the newest of a group goes dormant by age like any card, and keeps its group", () => {

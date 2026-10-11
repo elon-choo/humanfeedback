@@ -34,13 +34,15 @@ export async function generateMetadata({ params }: ProjectPageProps): Promise<Me
 export default async function ProjectPage({ params }: ProjectPageProps) {
   const { project: rawProject } = await params;
   const project = canonicalProject(rawProject);
-  const { requests, hidden, unavailable } = await getOpenRequests(project);
+  const { requests, hidden, partial, unavailable } =
+    await getOpenRequests(project);
 
   return (
     <BatchAnswerView
       project={project}
       requests={requests}
       hidden={hidden}
+      partial={partial}
       unavailable={unavailable}
       renderedAt={Date.now()}
     />

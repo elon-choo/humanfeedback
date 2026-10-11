@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { ArchiveLink, EmptyInbox, RequestCard } from "@/components/request-ui";
+import {
+  ArchiveLink,
+  EmptyInbox,
+  PartialNotice,
+  RequestCard,
+} from "@/components/request-ui";
 import { getOpenRequests } from "@/components/server-data";
 import {
   APP_SHORT_BRAND,
@@ -27,7 +32,7 @@ function groupByProject(requests: ListedDecisionRequest[]) {
 }
 
 export default async function DashboardPage() {
-  const { requests, hidden, unavailable } = await getOpenRequests();
+  const { requests, hidden, partial, unavailable } = await getOpenRequests();
   const groups = groupByProject(requests);
 
   return (
@@ -57,7 +62,8 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      <ArchiveLink dormant={hidden.dormant} superseded={hidden.superseded} />
+      <PartialNotice partial={partial} />
+      <ArchiveLink hidden={hidden} />
 
       {groups.length === 0 ? (
         <EmptyInbox />

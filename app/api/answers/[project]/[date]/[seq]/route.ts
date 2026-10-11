@@ -11,6 +11,7 @@ import {
   padSeq,
   requestPath,
   slugifyProject,
+  updateJson,
   writeJson,
   readJson,
 } from "@/lib/blob";
@@ -284,11 +285,28 @@ export async function POST(request: Request, context: RouteContext) {
 
   try {
     await writeJson(answerPath(slug, answerId), answer);
-    await writeJson(requestPath(slug), {
-      ...decisionRequest,
-      status: "answered",
-      answeredAt: decisionRequest.answeredAt ?? createdAt,
-    } satisfies DecisionRequest);
+    // decisionRequest was read before the transcription, which can take a
+    // while; writing it back would undo a dismissal or a visibility change
+    // made since. Mark the stored version answered instead.
+    try {
+      await updateJson<DecisionRequest>(requestPath(slug), (current) =>
+        current.status === "answered" && current.answeredAt
+          ? null
+          : {
+              ...current,
+              status: "answered",
+              answeredAt: current.answeredAt ?? createdAt,
+            },
+      );
+    } catch (error) {
+      // The answer is stored; never fail it over the status line.
+      console.error("Conditional status update failed for", slug, error);
+      await writeJson(requestPath(slug), {
+        ...decisionRequest,
+        status: "answered",
+        answeredAt: decisionRequest.answeredAt ?? createdAt,
+      } satisfies DecisionRequest);
+    }
   } catch (error) {
     console.error("Unable to save answer", error);
     return NextResponse.json(

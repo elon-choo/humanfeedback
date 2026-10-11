@@ -72,6 +72,10 @@ export interface DecisionRequest {
   visibilitySetAt?: string;
   /** Who set it, same meaning as dismissedVia. */
   visibilitySetVia?: "pin" | "bearer";
+  /** Random id of the POST that created this card, so a create whose response
+   *  was lost recognises its own write instead of posting the card again.
+   *  Absent on cards created before it existed. */
+  creationId?: string;
   cwd: string;
   machine: string;
   /** Claude Code session UUID that posted this (CLAUDE_CODE_SESSION_ID), for precise
@@ -103,6 +107,7 @@ export type CreateDecisionRequest = Omit<
   | "visibility"
   | "visibilitySetAt"
   | "visibilitySetVia"
+  | "creationId"
 > & {
   date?: string;
   /** Posts the card with visibility "keep". */

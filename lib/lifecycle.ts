@@ -76,8 +76,10 @@ export function cardLifecycles(
 ): Map<string, CardLifecycle> {
   const exactKey = (request: DecisionRequest) =>
     `${request.project}\n${normalizeTitle(request.title)}`;
+  // Digit runs become a character no title contains, so "승인 #" is not read
+  // as one more copy of "승인 1", "승인 2".
   const numberedKey = (request: DecisionRequest) =>
-    `${request.project}\n${normalizeTitle(request.title).replace(/\d+/g, "#")}`;
+    `${request.project}\n${normalizeTitle(request.title).replace(/\d+/g, "\u0001")}`;
   const exactGroups = groupBy(requests, exactKey);
   const numberedGroups = groupBy(requests, numberedKey);
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { requireBearer } from "@/lib/auth";
@@ -189,12 +191,14 @@ export async function POST(request: Request) {
     const now = new Date();
     const date = getKstDate(now);
     const createdAt = getKstIso(now);
-    const buildRequest = (slug: string, seq: number): DecisionRequest => ({
+    const creationId = randomUUID();
+    const buildRequest = (slug: string, seq: number) => ({
+      creationId,
       slug,
       project,
       date,
       seq,
-      status: "open",
+      status: "open" as const,
       urgency: input.urgency,
       createdAt,
       answeredAt: null,
@@ -226,7 +230,7 @@ export async function POST(request: Request) {
       ...(input.recipientPubKey !== undefined
         ? { recipientPubKey: input.recipientPubKey }
         : {}),
-    });
+    }) satisfies DecisionRequest;
 
     const { slug, seq } = await createRequestAtNextSeq(
       project,
