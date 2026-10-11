@@ -56,12 +56,17 @@ export function DismissControl({
   slug,
   onStateChange,
   align = "start",
+  initiallyDismissed = false,
 }: {
   slug: string;
   onStateChange?: (dismissed: boolean) => void;
   align?: "start" | "end";
+  /** For a list of already dismissed decisions: start at the 되돌리기 state. */
+  initiallyDismissed?: boolean;
 }) {
-  const [state, setState] = useState<DismissState>("idle");
+  const [state, setState] = useState<DismissState>(
+    initiallyDismissed ? "dismissed" : "idle",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const run = useCallback(

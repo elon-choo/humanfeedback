@@ -63,6 +63,15 @@ export interface DecisionRequest {
    *  an agent/CLI token. Mirrors DecisionAnswer.answeredVia so a cleared card is
    *  auditable (an agent can never silently erase an owner decision). */
   dismissedVia?: "pin" | "bearer";
+  /** Overrides the computed list placement of an open card (lib/lifecycle.ts):
+   *  "keep" = stays in the main list however old it gets (payment or send
+   *  approvals, an incident in progress, a far deadline); "dormant" = parked
+   *  in the archive now. Absent = by rule. Set at creation (keepVisible) or
+   *  through POST .../visibility. */
+  visibility?: "keep" | "dormant";
+  visibilitySetAt?: string;
+  /** Who set it, same meaning as dismissedVia. */
+  visibilitySetVia?: "pin" | "bearer";
   cwd: string;
   machine: string;
   /** Claude Code session UUID that posted this (CLAUDE_CODE_SESSION_ID), for precise
@@ -85,9 +94,19 @@ export interface DecisionRequest {
 
 export type CreateDecisionRequest = Omit<
   DecisionRequest,
-  "slug" | "date" | "seq" | "status" | "createdAt" | "answeredAt"
+  | "slug"
+  | "date"
+  | "seq"
+  | "status"
+  | "createdAt"
+  | "answeredAt"
+  | "visibility"
+  | "visibilitySetAt"
+  | "visibilitySetVia"
 > & {
   date?: string;
+  /** Posts the card with visibility "keep". */
+  keepVisible?: boolean;
 };
 
 export interface DecisionAnswer {

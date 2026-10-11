@@ -3,8 +3,11 @@ import { NextResponse } from "next/server";
 
 import { requireBearer } from "@/lib/auth";
 import {
+  type ListCompleteness,
+  listCompletenessHeader,
   listPrefix,
   listedReadStats,
+  newListCompleteness,
   readListedBlobs,
   readListedJson,
   slugFromAnswerPath,
@@ -28,8 +31,9 @@ async function readAnswers(
   blobs: ListBlobResultBlob[],
   since: number | null,
   unpickedOnly: boolean,
+  completeness: ListCompleteness,
 ): Promise<DecisionAnswer[]> {
-  return (await readListedBlobs<DecisionAnswer>(blobs))
+  return (await readListedBlobs<DecisionAnswer>(blobs, completeness))
     .filter((answer) => !unpickedOnly || !answer.pickedUp)
     .filter(
       (answer) =>
@@ -87,6 +91,15 @@ export async function GET(request: Request) {
         answerBlobs: answers,
       })),
     );
+    // Counts the request and answer blobs this response was built from; a
+    // card whose request blob could not be read is missing from items.
+    const completeness = newListCompleteness();
+    const unreadRequests = loaded.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    completeness.listed += loaded.length;
+    completeness.read += loaded.length - unreadRequests;
+    completeness.failed += unreadRequests;
     const matchingRequests = loaded
       .flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : [],
@@ -99,7 +112,12 @@ export async function GET(request: Request) {
 
     const resolved = await Promise.all(
       matchingRequests.map(async ({ decisionRequest, answerBlobs }) => {
-        const answers = await readAnswers(answerBlobs, since, unpickedOnly);
+        const answers = await readAnswers(
+          answerBlobs,
+          since,
+          unpickedOnly,
+          completeness,
+        );
         const effectiveRequest: DecisionRequest =
           answers.length > 0 && decisionRequest.status !== "answered"
             ? {
@@ -125,8 +143,13 @@ export async function GET(request: Request) {
       );
 
     return NextResponse.json(
-      { items },
-      { headers: { "x-blob-reads": listedReadStats() } },
+      { items, completeness },
+      {
+        headers: {
+          "x-blob-reads": listedReadStats(),
+          "x-list-completeness": listCompletenessHeader(completeness),
+        },
+      },
     );
   } catch (error) {
     console.error("Unable to list answers", error);

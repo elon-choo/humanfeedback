@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { EmptyInbox, RequestCard } from "@/components/request-ui";
+import { ArchiveLink, EmptyInbox, RequestCard } from "@/components/request-ui";
 import { getOpenRequests } from "@/components/server-data";
 import {
   APP_SHORT_BRAND,
   APP_TITLE,
   DASHBOARD_BRAND,
 } from "@/lib/public-config";
-import type { DecisionRequest } from "@/lib/types";
+import type { ListedDecisionRequest } from "@/lib/lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,8 @@ export const metadata: Metadata = {
   title: { absolute: APP_TITLE },
 };
 
-function groupByProject(requests: DecisionRequest[]) {
-  const groups = new Map<string, DecisionRequest[]>();
+function groupByProject(requests: ListedDecisionRequest[]) {
+  const groups = new Map<string, ListedDecisionRequest[]>();
   for (const request of requests) {
     const group = groups.get(request.project) ?? [];
     group.push(request);
@@ -27,7 +27,7 @@ function groupByProject(requests: DecisionRequest[]) {
 }
 
 export default async function DashboardPage() {
-  const { requests, unavailable } = await getOpenRequests();
+  const { requests, hidden, unavailable } = await getOpenRequests();
   const groups = groupByProject(requests);
 
   return (
@@ -56,6 +56,8 @@ export default async function DashboardPage() {
           {APP_SHORT_BRAND} 저장소에 잠시 연결할 수 없어요. 잠시 뒤 새로고침해 주세요.
         </div>
       ) : null}
+
+      <ArchiveLink dormant={hidden.dormant} superseded={hidden.superseded} />
 
       {groups.length === 0 ? (
         <EmptyInbox />

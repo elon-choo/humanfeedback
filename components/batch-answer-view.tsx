@@ -12,21 +12,26 @@ import {
 } from "@/components/decision-presentation";
 import { DismissControl } from "@/components/dismiss-controls";
 import {
+  ArchiveLink,
   EmptyInbox,
   formatAge,
+  GroupBadge,
   UrgencyLabel,
 } from "@/components/request-ui";
-import type { DecisionRequest } from "@/lib/types";
+import type { HiddenCounts } from "@/components/server-data";
+import { VisibilityControl } from "@/components/visibility-controls";
+import type { ListedDecisionRequest } from "@/lib/lifecycle";
 
 type BatchAnswerViewProps = {
   project: string;
-  requests: DecisionRequest[];
+  requests: ListedDecisionRequest[];
+  hidden: HiddenCounts;
   unavailable: boolean;
   renderedAt: number;
 };
 
 type BatchDecisionCardProps = {
-  request: DecisionRequest;
+  request: ListedDecisionRequest;
   answered: boolean;
   dismissed: boolean;
   renderedAt: number;
@@ -66,6 +71,7 @@ function BatchDecisionCard({
           <span className="text-xs font-bold tabular-nums text-[#5f6269]">
             {request.date} · {String(request.seq).padStart(3, "0")}
           </span>
+          {request.group ? <GroupBadge group={request.group} /> : null}
           {answered ? (
             <span
               className="ml-auto rounded-full border border-[#31513d] bg-[#142219] px-3 py-1.5 text-xs font-black text-[#78dca1]"
@@ -192,9 +198,16 @@ function BatchDecisionCard({
         </section>
 
         {answered ? null : (
-          <div className="mt-4 border-t border-[#2b2f36] pt-4">
+          <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[#2b2f36] pt-4">
             <DismissControl
               slug={request.slug}
+              onStateChange={(next) => onDismissedChange(request.slug, next)}
+            />
+            {/* Parked counts like dismissed here: off this list either way. */}
+            <VisibilityControl
+              slug={request.slug}
+              action="park"
+              previous={request.visibility ?? "auto"}
               onStateChange={(next) => onDismissedChange(request.slug, next)}
             />
           </div>
@@ -207,6 +220,7 @@ function BatchDecisionCard({
 export function BatchAnswerView({
   project,
   requests,
+  hidden,
   unavailable,
   renderedAt,
 }: BatchAnswerViewProps) {
@@ -280,6 +294,8 @@ export function BatchAnswerView({
           결정함 저장소에 잠시 연결할 수 없어요. 잠시 뒤 새로고침해 주세요.
         </div>
       ) : null}
+
+      <ArchiveLink dormant={hidden.dormant} superseded={hidden.superseded} />
 
       {requests.length === 0 ? (
         <EmptyInbox project={project} />

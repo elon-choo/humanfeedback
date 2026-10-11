@@ -2,16 +2,16 @@ import { NextResponse } from "next/server";
 
 import { requireBearer } from "@/lib/auth";
 import {
+  createRequestAtNextSeq,
   getKstDate,
   getKstIso,
+  listCompletenessHeader,
   listRequests,
   listedReadStats,
-  nextSeq,
-  padSeq,
-  requestPath,
+  newListCompleteness,
   slugifyProject,
-  writeJson,
 } from "@/lib/blob";
+import { withLifecycle } from "@/lib/lifecycle";
 import type {
   CreateDecisionRequest,
   DecisionRequest,
@@ -88,6 +88,9 @@ function validateCreateRequest(value: unknown): string | null {
   }
   if (value.sessionLabel !== undefined && typeof value.sessionLabel !== "string") {
     return "sessionLabel must be a string";
+  }
+  if (value.keepVisible !== undefined && typeof value.keepVisible !== "boolean") {
+    return "keepVisible must be a boolean";
   }
 
   if (
@@ -186,10 +189,7 @@ export async function POST(request: Request) {
     const now = new Date();
     const date = getKstDate(now);
     const createdAt = getKstIso(now);
-    const seq = await nextSeq(project, date);
-    const slug = `${project}/${date}/${padSeq(seq)}`;
-
-    const decisionRequest: DecisionRequest = {
+    const buildRequest = (slug: string, seq: number): DecisionRequest => ({
       slug,
       project,
       date,
@@ -198,6 +198,13 @@ export async function POST(request: Request) {
       urgency: input.urgency,
       createdAt,
       answeredAt: null,
+      ...(input.keepVisible === true
+        ? {
+            visibility: "keep" as const,
+            visibilitySetAt: createdAt,
+            visibilitySetVia: "bearer" as const,
+          }
+        : {}),
       cwd: input.cwd,
       machine: input.machine,
       ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
@@ -219,9 +226,13 @@ export async function POST(request: Request) {
       ...(input.recipientPubKey !== undefined
         ? { recipientPubKey: input.recipientPubKey }
         : {}),
-    };
+    });
 
-    await writeJson(requestPath(slug), decisionRequest);
+    const { slug, seq } = await createRequestAtNextSeq(
+      project,
+      date,
+      buildRequest,
+    );
 
     return NextResponse.json({
       slug,
@@ -247,6 +258,8 @@ export async function GET(request: Request) {
   const cwd = searchParams.get("cwd");
   const sessionId = searchParams.get("sessionId");
   const since = validSince(searchParams.get("since"));
+  // Open cards only: where the card is shown (lib/lifecycle.ts).
+  const view = searchParams.get("view");
 
   if (
     status &&
@@ -256,13 +269,23 @@ export async function GET(request: Request) {
   ) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
+  if (view && view !== "active" && view !== "dormant" && view !== "superseded") {
+    return NextResponse.json({ error: "Invalid view" }, { status: 400 });
+  }
   if (Number.isNaN(since)) {
     return NextResponse.json({ error: "Invalid since timestamp" }, { status: 400 });
   }
 
   try {
-    const requests = (await listRequests())
+    const completeness = newListCompleteness();
+    // Annotated before filtering: a card is superseded by a newer copy of any
+    // status, in any filter result.
+    const requests = withLifecycle(
+      await listRequests("req/", completeness),
+      Date.now(),
+    )
       .filter((item) => !status || item.status === status)
+      .filter((item) => !view || item.view === view)
       .filter((item) => !project || item.project === project)
       .filter((item) => !cwd || item.cwd === cwd)
       .filter((item) => !sessionId || item.sessionId === sessionId)
@@ -278,8 +301,13 @@ export async function GET(request: Request) {
       });
 
     return NextResponse.json(
-      { requests },
-      { headers: { "x-blob-reads": listedReadStats() } },
+      { requests, completeness },
+      {
+        headers: {
+          "x-blob-reads": listedReadStats(),
+          "x-list-completeness": listCompletenessHeader(completeness),
+        },
+      },
     );
   } catch (error) {
     console.error("Unable to list decision requests", error);

@@ -311,7 +311,39 @@ export async function writeJson(
   }
 }
 
-async function putJson(pathname: string, value: unknown): Promise<void> {
+// Stores a blob that must not exist yet. true = this body is what is stored;
+// false = the pathname already holds something else. Two posts for the same
+// project and day can be handed the same sequence number (nextSeq is a list
+// followed by max+1), and writeJson would let the second silently replace the
+// first card.
+export async function createJson(
+  pathname: string,
+  value: unknown,
+): Promise<boolean> {
+  invalidateListedJson(pathname);
+  try {
+    await putJson(pathname, value, false);
+    return true;
+  } catch (error) {
+    // "Already exists" and "stored, but the response was lost" both arrive
+    // here as a failed put, so decide from what is stored now.
+    let stored: unknown;
+    try {
+      stored = await readJson<unknown>(pathname);
+    } catch {
+      throw error;
+    }
+    return JSON.stringify(stored) === JSON.stringify(value);
+  } finally {
+    invalidateListedJson(pathname);
+  }
+}
+
+async function putJson(
+  pathname: string,
+  value: unknown,
+  allowOverwrite = true,
+): Promise<void> {
   await put(pathname, JSON.stringify(value), {
     // NOTE: the provisioned Blob store is a PUBLIC store, so private access is
     // not available (audio/attachments also need public URLs). Request/answer
@@ -322,7 +354,7 @@ async function putJson(pathname: string, value: unknown): Promise<void> {
     // single-user tool; upgrade path = a private store + authed media proxy.
     access: "public",
     addRandomSuffix: false,
-    allowOverwrite: true,
+    allowOverwrite,
     contentType: "application/json; charset=utf-8",
     cacheControlMaxAge: 60,
     token: blobToken(),
@@ -375,22 +407,64 @@ export async function nextSeq(project: string, date: string): Promise<number> {
   return maximum + 1;
 }
 
+// Stores a new card under the next free sequence number for (project, date).
+// The number is only taken once the write went through: when another post got
+// there first, the number after it is tried.
+export async function createRequestAtNextSeq<T>(
+  project: string,
+  date: string,
+  build: (slug: string, seq: number) => T,
+): Promise<{ slug: string; seq: number }> {
+  let seq = await nextSeq(project, date);
+  for (let attempt = 0; ; attempt += 1) {
+    const slug = `${project}/${date}/${padSeq(seq)}`;
+    if (await createJson(requestPath(slug), build(slug, seq))) {
+      return { slug, seq };
+    }
+    if (attempt >= 4) throw new Error(`No free sequence number at ${slug}`);
+    seq = Math.max(seq + 1, await nextSeq(project, date));
+  }
+}
+
+// How much of a listing was actually read. A blob that still fails after the
+// retries is left out of the response rather than failing it, so a caller that
+// needs every record (an export, a count) checks failed === 0.
+export type ListCompleteness = { listed: number; read: number; failed: number };
+
+export function newListCompleteness(): ListCompleteness {
+  return { listed: 0, read: 0, failed: 0 };
+}
+
+export function listCompletenessHeader(completeness: ListCompleteness): string {
+  return `listed=${completeness.listed};read=${completeness.read};failed=${completeness.failed}`;
+}
+
 export async function listRequests(
   prefix = "req/",
+  completeness?: ListCompleteness,
 ): Promise<DecisionRequest[]> {
   const blobs = (await listPrefix(prefix)).filter((blob) =>
     blob.pathname.endsWith(".json"),
   );
-  return readListedBlobs<DecisionRequest>(blobs);
+  return readListedBlobs<DecisionRequest>(blobs, completeness);
 }
 
 export async function readListedBlobs<T>(
   blobs: ListBlobResultBlob[],
+  completeness?: ListCompleteness,
 ): Promise<T[]> {
   const settled = await Promise.allSettled(
     blobs.map((blob) => readListedJson<T>(blob)),
   );
 
+  if (completeness) {
+    const failed = settled.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    completeness.listed += settled.length;
+    completeness.read += settled.length - failed;
+    completeness.failed += failed;
+  }
   return settled.flatMap((result) =>
     result.status === "fulfilled" ? [result.value] : [],
   );

@@ -1,7 +1,9 @@
 import Link from "next/link";
 
 import { DismissControl } from "@/components/dismiss-controls";
-import type { DecisionRequest, Urgency } from "@/lib/types";
+import { VisibilityControl } from "@/components/visibility-controls";
+import type { CardGroup, ListedDecisionRequest } from "@/lib/lifecycle";
+import type { Urgency } from "@/lib/types";
 
 const urgencyMeta: Record<Urgency, { label: string; dot: string; text: string }> = {
   high: { label: "지금 필요", dot: "bg-[#ff5a36]", text: "text-[#ff8a70]" },
@@ -36,7 +38,21 @@ export function UrgencyLabel({ urgency, compact = false }: { urgency: Urgency; c
   );
 }
 
-export function RequestCard({ request }: { request: DecisionRequest }) {
+// "같은 카드 12번째 · 9월 6일부터": this card was posted again and its older
+// copies sit in the archive.
+export function GroupBadge({ group }: { group: CardGroup }) {
+  const since = new Intl.DateTimeFormat("ko-KR", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(group.firstCreatedAt));
+  return (
+    <span className="rounded-full border border-[#3d3a2c] bg-[#1c1a12] px-2.5 py-1 text-[0.68rem] font-black text-[#d9c27a]">
+      같은 카드 {group.count}번째 · {since}부터
+    </span>
+  );
+}
+
+export function RequestCard({ request }: { request: ListedDecisionRequest }) {
   return (
     <article className="surface group overflow-hidden p-5 transition-colors hover:border-[#454a54] sm:p-6">
       <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -48,6 +64,7 @@ export function RequestCard({ request }: { request: DecisionRequest }) {
         </Link>
         <UrgencyLabel urgency={request.urgency} compact />
         <span className="text-xs font-semibold text-[#74777e]">{formatAge(request.createdAt)}</span>
+        {request.group ? <GroupBadge group={request.group} /> : null}
       </div>
 
       <h2 className="text-balance text-xl font-black leading-[1.38] tracking-[-0.025em] text-[#f7f4ed] sm:text-2xl">
@@ -65,10 +82,42 @@ export function RequestCard({ request }: { request: DecisionRequest }) {
         <span aria-hidden="true">→</span>
       </Link>
 
-      <div className="mt-3 border-t border-[#292d34] pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[#292d34] pt-3">
         <DismissControl slug={request.slug} />
+        <VisibilityControl
+          slug={request.slug}
+          action="park"
+          previous={request.visibility ?? "auto"}
+        />
       </div>
     </article>
+  );
+}
+
+// One line above the list: what the main list leaves out, and where it went.
+export function ArchiveLink({
+  dormant,
+  superseded,
+}: {
+  dormant: number;
+  superseded: number;
+}) {
+  if (dormant + superseded === 0) return null;
+  const parts = [
+    dormant > 0 ? `오래 기다린 카드 ${dormant}장` : null,
+    superseded > 0 ? `반복해서 올라온 카드 ${superseded}장` : null,
+  ].filter(Boolean);
+  return (
+    <Link
+      href="/archive"
+      className="mb-8 flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-[#30343b] bg-[#14171c] px-5 py-3 text-sm font-bold leading-6 text-[#a9abb0] transition-colors hover:border-[#545963] hover:text-white"
+    >
+      <span>
+        <span className="font-black text-[#e2e0db]">보관함</span>
+        <span className="ml-2">{parts.join(" · ")}</span>
+      </span>
+      <span aria-hidden="true">→</span>
+    </Link>
   );
 }
 
