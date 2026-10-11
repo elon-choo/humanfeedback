@@ -238,7 +238,7 @@ async function ArchiveProject({ project, all }: { project: string; all: boolean 
       <Section
         title="반복해서 올라온 카드"
         count={repeatCount}
-        note="같은 제목으로 다시 올라온 카드는 가장 새 것 하나만 첫 화면에 둡니다. 아래는 그 뒤에 접어 둔 이전 카드입니다."
+        note="같은 제목으로 여러 번 올라온 카드는 가장 새 것 하나만 남기고, 이전 카드는 여기 접어 둡니다."
       >
         {repeats.map(({ newest, members }) => {
           const since = formatKstDay(members[members.length - 1].createdAt);
