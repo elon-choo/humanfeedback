@@ -27,6 +27,7 @@ const headWithoutEtag = new Set(); // head() reports no ETag for these
 const servedWithoutEtag = new Set(); // the CDN serves no ETag header for these
 const transientFailures = new Map(); // pathname -> number of head() calls that throw a network error first
 let putNeverSettles = false; // put() only ends when its abortSignal fires (as an AbortError, like the client)
+let headNeverSettles = false; // head() never answers
 const putLog = [];
 const listHides = new Set(); // pathnames list() does not report yet
 const staleCdn = new Map(); // pathname -> { body, version, serves } : the CDN answers with this old copy `serves` more times
@@ -42,6 +43,7 @@ globalThis.__blobClient = {
   BlobPreconditionFailedError,
   del: null,
   head: async (pathname) => {
+    if (headNeverSettles) return new Promise(() => {});
     const failures = transientFailures.get(pathname) ?? 0;
     if (failures > 0) { transientFailures.set(pathname, failures - 1); throw new TypeError("fetch failed"); }
     const blob = store.get(pathname);
@@ -90,11 +92,14 @@ globalThis.fetch = async (input) => {
   const blob = store.get(pathname);
   return new Response(blob.body, { status: 200, headers: servedWithoutEtag.has(pathname) ? {} : { etag: `"v${blob.version}"` } });
 };
-// The retries and collision waits back off for real time; only outcomes matter here.
+// The retries and collision waits back off for real time; only outcomes matter here, so
+// they run at once. The create deadline keeps its (short) real length: it has to lose
+// against work that finishes and win against work that never does.
+const CREATE_DEADLINE_MS = 400;
 const realSetTimeout = globalThis.setTimeout;
-globalThis.setTimeout = (callback, _ms, ...args) => realSetTimeout(callback, 0, ...args);
+globalThis.setTimeout = (callback, ms, ...args) => realSetTimeout(callback, ms === CREATE_DEADLINE_MS ? ms : 0, ...args);
 process.env.BLOB_READ_WRITE_TOKEN = "test-token";
-process.env.BLOB_CREATE_DEADLINE_MS = "300";
+process.env.BLOB_CREATE_DEADLINE_MS = String(CREATE_DEADLINE_MS);
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`;
 const { createJson, createRequestAtNextSeq, updateJson, writeJson, isBlobNotFound, readListedBlobs, listRequests, newListCompleteness, listCompletenessHeader } = await import(moduleUrl);
@@ -219,6 +224,12 @@ await check("a put that never answers is aborted at the deadline with an AbortEr
   // Stored by this caller but the answer never came: counted as written.
   seed("req/p/2026-10-11/021.json", { creationId: "H" });
   assert.equal(await createJson("req/p/2026-10-11/021.json", { creationId: "H" }, own("H")), true);
+  // The put times out and the check that follows stalls too: still returns near the deadline.
+  headNeverSettles = true;
+  const again = Date.now();
+  await assert.rejects(createJson("req/p/2026-10-11/022.json", { creationId: "I" }, own("I")), /timed out/);
+  assert.ok(Date.now() - again < 5_000, "a stalled check does not hold the request");
+  headNeverSettles = false;
   putNeverSettles = false;
 });
 

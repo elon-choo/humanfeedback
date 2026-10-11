@@ -423,12 +423,24 @@ export async function createJson<T>(
     return true;
   } catch (error) {
     // "Already exists" and "stored, but the response was lost" both arrive
-    // here as a failed put, so decide from what is stored now.
+    // here as a failed put, so decide from what is stored now — within a
+    // deadline of its own, so a stalled read cannot hold the request either.
     let stored: T;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      stored = (await readVersionedJson<T>(pathname)).value;
+      stored = await Promise.race([
+        readVersionedJson<T>(pathname).then((read) => read.value),
+        new Promise<never>((_, reject) => {
+          recoveryTimer = setTimeout(
+            () => reject(new Error(`create check timed out: ${pathname}`)),
+            CREATE_DEADLINE_MS,
+          );
+        }),
+      ]);
     } catch {
       throw error;
+    } finally {
+      clearTimeout(recoveryTimer);
     }
     return isOwn(stored);
   } finally {
