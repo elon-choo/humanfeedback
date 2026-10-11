@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireBearer } from "@/lib/auth";
-import { answerPrefix, listPrefix, readJson, writeJson } from "@/lib/blob";
+import { answerPrefix, listPrefix, updateJson } from "@/lib/blob";
 import type { DecisionAnswer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,10 +43,12 @@ export async function POST(request: Request) {
         blob.pathname.endsWith(".json"),
       );
       for (const blob of blobs) {
-        const answer = await readJson<DecisionAnswer>(blob.pathname);
-        if (answer.pickedUp) continue;
-        await writeJson(blob.pathname, { ...answer, pickedUp: true });
-        updated += 1;
+        // Only the flag changes, on the stored version: a reason added to the
+        // answer meanwhile must not be written over with an older copy.
+        const { written } = await updateJson<DecisionAnswer>(blob.pathname, (answer) =>
+          answer.pickedUp ? null : { ...answer, pickedUp: true },
+        );
+        if (written) updated += 1;
       }
     }
   } catch (error) {
