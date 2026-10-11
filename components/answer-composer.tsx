@@ -262,6 +262,8 @@ export function AnswerComposer({
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [anotherRecordingActive, setAnotherRecordingActive] = useState(false);
+  const [reasonText, setReasonText] = useState("");
+  const [reasonPhase, setReasonPhase] = useState<"idle" | "sending" | "sent">("idle");
 
   const mountedRef = useRef(true);
   const discardOnStopRef = useRef(false);
@@ -1017,6 +1019,30 @@ export function AnswerComposer({
   const selectedOption = saved?.chosenOption
     ? options.find((option) => option.n === saved.chosenOption)
     : undefined;
+  // A number that differs from the recommendation is the most useful thing to
+  // learn from, and the number alone does not say why.
+  const recommendedOption = options.find((option) => option.recommended);
+  const askWhy =
+    saved?.kind === "number" &&
+    recommendedOption !== undefined &&
+    selectedOption !== undefined &&
+    selectedOption.n !== recommendedOption.n;
+
+  async function sendReason(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reason = reasonText.trim();
+    if (!reason || !saved?.chosenOption || reasonPhase !== "idle") return;
+    setReasonPhase("sending");
+    setError("");
+    try {
+      // Same number again, so the reason can never be read as a different choice.
+      await postAnswer({ kind: "text", chosenOption: saved.chosenOption, text: reason });
+      setReasonPhase("sent");
+    } catch (reasonError) {
+      setReasonPhase("idle");
+      setError(errorMessage(reasonError));
+    }
+  }
   const hasSecretContent = secretRequests.some(
     (request) =>
       secretValues[request.id]?.length > 0 || encryptedSecretIds.includes(request.id),
@@ -1397,6 +1423,35 @@ export function AnswerComposer({
                 </a>
               )}
             </div>
+          ) : null}
+
+          {phase === "success" && askWhy ? (
+            reasonPhase === "sent" ? (
+              <p className="pb-2 text-xs font-bold text-[#78dca1]">고마워요. 다음 카드부터 참고할게요.</p>
+            ) : (
+              <form onSubmit={sendReason} className="pb-2">
+                <label htmlFor={`${instanceId}-reason`} className="block text-xs font-bold leading-5 text-[#a9abb0]">
+                  추천과 다르게 고르셨네요. 이유를 한 줄 남겨 주시면 다음엔 더 잘 맞출게요. (안 써도 돼요)
+                </label>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    id={`${instanceId}-reason`}
+                    value={reasonText}
+                    onChange={(event) => setReasonText(event.target.value)}
+                    maxLength={500}
+                    placeholder="예: 지금은 비용보다 속도가 중요해서"
+                    className="min-h-11 min-w-0 flex-1 rounded-xl border border-[#3a3e46] bg-[#14171c] px-3 text-sm font-semibold text-[#ece9e2] placeholder:text-[#5f6269] focus:border-[#ff5a36] focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!reasonText.trim() || reasonPhase === "sending"}
+                    className="min-h-11 shrink-0 rounded-xl bg-[#ff5a36] px-4 text-xs font-black text-white transition-colors hover:bg-[#ff6747] disabled:opacity-40"
+                  >
+                    {reasonPhase === "sending" ? "남기는 중…" : "남기기"}
+                  </button>
+                </div>
+              </form>
+            )
           ) : null}
         </div>
 
